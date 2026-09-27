@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -7,6 +6,8 @@ namespace AutoUseSkill
 {
     public class AutoUseSkill : ModBehaviour
     {
+        private const int WindowId = 894270;
+
         private bool AutoCastOutOfCombat;
         private bool ShowGUI;
         private KeyCode OpenMenuKey = KeyCode.I;
@@ -14,29 +15,21 @@ namespace AutoUseSkill
         private Rect WindowRect;
         private bool Auto_Attack;
         private bool[] AutoUseDict = new bool[4];
-        private double lastSearchTime = 0d;
-        private double SearchInterval = 0.01d;
+        private float lastSearchTime = 0f;
+        private float SearchInterval = 0.05f;
 
         private string feedbackText = "";
         private float feedbackEndTime = 0f;
 
-        private static bool IsInCombatRoom
+        private bool isInCombatRoom = false;
+        private Canvas cachedCanvas = null;
+
+        private bool IsInCombatRoom
         {
-            get
-            {
-                try
-                {
-                    string sceneName = SceneManager.GetActiveScene().name;
-                    return sceneName != null && sceneName.StartsWith("Room_");
-                }
-                catch
-                {
-                    return false;
-                }
-            }
+            get { return isInCombatRoom; }
         }
 
-        private static Hero Player
+        private Hero Player
         {
             get
             {
@@ -48,7 +41,7 @@ namespace AutoUseSkill
             }
         }
 
-        private static ControlManager controlManager
+        private ControlManager controlManager
         {
             get { return ManagerBase<ControlManager>.instance; }
         }
@@ -56,13 +49,46 @@ namespace AutoUseSkill
         private void Awake()
         {
             Debug.Log("[AutoUseSkill] Mod loaded successfully!");
-            WindowRect = new Rect(Screen.width * 0.4f, Screen.height * 0.4f, Screen.width * 0.25f, Screen.height * ButtonHeight * 4.5f);
+            // Dynamic window height calculated by GUILayout
+            WindowRect = new Rect(Screen.width * 0.4f, Screen.height * 0.4f, Screen.width * 0.25f, 0f);
+            UpdateCombatRoomStatus(SceneManager.GetActiveScene());
+            SceneManager.activeSceneChanged += OnActiveSceneChanged;
         }
 
         private void OnDestroy()
         {
+            SceneManager.activeSceneChanged -= OnActiveSceneChanged;
             ShowGUI = false;
+            Auto_Attack = false;
+            if (AutoUseDict != null)
+            {
+                for (int i = 0; i < AutoUseDict.Length; i++)
+                {
+                    AutoUseDict[i] = false;
+                }
+            }
+            cachedCanvas = null;
             Debug.Log("[AutoUseSkill] Mod unloaded.");
+        }
+
+        private void OnActiveSceneChanged(Scene current, Scene next)
+        {
+            cachedCanvas = null;
+            UpdateCombatRoomStatus(next);
+        }
+
+        private void UpdateCombatRoomStatus(Scene scene)
+        {
+            try
+            {
+                string sceneName = scene.name;
+                isInCombatRoom = sceneName != null && sceneName.StartsWith("Room_");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[AutoUseSkill] UpdateCombatRoomStatus error: " + ex.Message);
+                isInCombatRoom = false;
+            }
         }
 
         private void ShowFeedback(string text)
@@ -82,42 +108,50 @@ namespace AutoUseSkill
             if (Input.GetKeyDown(KeyCode.F1))
             {
                 AutoUseDict[0] = !AutoUseDict[0];
-                ShowFeedback("Q 技能自动释放: " + (AutoUseDict[0] ? "开启 (ON)" : "关闭 (OFF)"));
+                ShowFeedback(string.Format("Q 技能自动释放: {0}", AutoUseDict[0] ? "开启 (ON)" : "关闭 (OFF)"));
             }
             if (Input.GetKeyDown(KeyCode.F2))
             {
                 AutoUseDict[1] = !AutoUseDict[1];
-                ShowFeedback("W 技能自动释放: " + (AutoUseDict[1] ? "开启 (ON)" : "关闭 (OFF)"));
+                ShowFeedback(string.Format("W 技能自动释放: {0}", AutoUseDict[1] ? "开启 (ON)" : "关闭 (OFF)"));
             }
             if (Input.GetKeyDown(KeyCode.F3))
             {
                 AutoUseDict[2] = !AutoUseDict[2];
-                ShowFeedback("E 技能自动释放: " + (AutoUseDict[2] ? "开启 (ON)" : "关闭 (OFF)"));
+                ShowFeedback(string.Format("E 技能自动释放: {0}", AutoUseDict[2] ? "开启 (ON)" : "关闭 (OFF)"));
             }
             if (Input.GetKeyDown(KeyCode.F4))
             {
                 AutoUseDict[3] = !AutoUseDict[3];
-                ShowFeedback("R 技能自动释放: " + (AutoUseDict[3] ? "开启 (ON)" : "关闭 (OFF)"));
+                ShowFeedback(string.Format("R 技能自动释放: {0}", AutoUseDict[3] ? "开启 (ON)" : "关闭 (OFF)"));
             }
             if (Input.GetKeyDown(KeyCode.F5))
             {
                 Auto_Attack = !Auto_Attack;
-                ShowFeedback("自动普通攻击: " + (Auto_Attack ? "开启 (ON)" : "关闭 (OFF)"));
+                ShowFeedback(string.Format("自动普通攻击: {0}", Auto_Attack ? "开启 (ON)" : "关闭 (OFF)"));
             }
 
-            if (Player == null || (!AutoCastOutOfCombat && !Player.isInCombat)) return;
+            // Local cache to guard against TOCTOU null reference
+            Hero player = Player;
+            if (player == null || (!AutoCastOutOfCombat && !player.isInCombat)) return;
             if (Time.time - lastSearchTime < SearchInterval) return;
             lastSearchTime = Time.time;
-            TryAutoCastSkill();
-            TryAutoAttack();
+
+            ControlManager cm = controlManager;
+
+            // Single search for closest enemy per interval to optimize performance
+            Entity closestEnemy = FindClosestEnemy(player, 25f);
+
+            TryAutoCastSkill(player, cm, closestEnemy);
+            TryAutoAttack(player, closestEnemy);
         }
 
-        private Entity FindClosestEnemy(float maxRange)
+        private Entity FindClosestEnemy(Hero player, float maxRange)
         {
-            if (Player == null) return null;
+            if (player == null) return null;
             Entity closest = null;
             float minDistSq = maxRange * maxRange;
-            Vector3 playerPos = Player.agentPosition;
+            Vector3 playerPos = player.agentPosition;
 
             try
             {
@@ -126,7 +160,7 @@ namespace AutoUseSkill
                     foreach (Entity e in NetworkedManagerBase<ActorManager>.instance.allEntities)
                     {
                         if (e == null || !e.isActive) continue;
-                        if (Player.GetRelation(e) != EntityRelation.Enemy) continue;
+                        if (player.GetRelation(e) != EntityRelation.Enemy) continue;
                         if (e.Status != null && e.Status.isUndetectableByNonAllies) continue;
 
                         float dSq = (e.agentPosition - playerPos).sqrMagnitude;
@@ -138,50 +172,88 @@ namespace AutoUseSkill
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[AutoUseSkill] FindClosestEnemy error: " + ex.Message);
+            }
 
             return closest;
         }
 
-        private void TryAutoCastSkill()
+        private void TryAutoCastSkill(Hero player, ControlManager cm, Entity closestEnemy)
         {
+            if (player == null || cm == null) return;
+
             for (var i = 0; i <= 3; i++)
             {
                 if (!AutoUseDict[i]) continue;
                 AbilityTrigger abilityTrigger;
-                if (!Player.Ability.abilities.TryGetValue(i, out abilityTrigger)) continue;
+                if (!player.Ability.abilities.TryGetValue(i, out abilityTrigger)) continue;
                 SkillTrigger skill = abilityTrigger as SkillTrigger;
-                if (skill == null) continue;
+                if (skill == null || skill.IsNullOrInactive()) continue;
+
+                // Protect continuous channeling skills from being disrupted
+                if (skill.Network_isCasting) continue;
                 if (!skill.CanBeCast()) continue;
 
                 float range = skill.currentConfig != null ? skill.currentConfig.effectiveRange : 8f;
-                Entity target = controlManager.targetEnemy;
-                if (target == null || !target.isActive || Player.GetRelation(target) != EntityRelation.Enemy)
+                Entity target = cm.targetEnemy;
+
+                if (target == null || !target.isActive || player.GetRelation(target) != EntityRelation.Enemy)
                 {
-                    target = FindClosestEnemy(range);
+                    if (closestEnemy != null && closestEnemy.isActive)
+                    {
+                        float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
+                        if (dSq <= range * range)
+                        {
+                            target = closestEnemy;
+                        }
+                    }
                 }
 
-                if (target != null && skill.currentConfig != null && !skill.currentConfig.CheckRange(Player, target))
+                if (target != null && skill.currentConfig != null && !skill.currentConfig.CheckRange(player, target))
                 {
                     continue;
                 }
 
-                if (target != null)
+                // If no enemy target in range, verify whether skill requires a target before casting
+                if (target == null && skill.currentConfig != null && skill.currentConfig.castMethod != null)
                 {
-                    controlManager.CastAbility(skill, new CastInfo(Player, target), false);
+                    CastMethodType methodType = skill.currentConfig.castMethod.type;
+                    if (methodType == CastMethodType.Target || methodType == CastMethodType.Cone || methodType == CastMethodType.Arrow)
+                    {
+                        // Directional / targeted skills should not fire into empty air
+                        continue;
+                    }
                 }
-                else
+
+                try
                 {
-                    controlManager.CastAbilityAuto(skill);
+                    if (target != null)
+                    {
+                        cm.CastAbility(skill, new CastInfo(player, target), false);
+                    }
+                    else
+                    {
+                        cm.CastAbilityAuto(skill);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[AutoUseSkill] CastAbility error: " + ex.Message);
                 }
             }
         }
 
-        private void TryAutoAttack()
+        private void TryAutoAttack(Hero player, Entity closestEnemy)
         {
-            if (!Auto_Attack || Player == null) return;
-            AbilityTrigger attackAbility = Player.Ability.attackAbility;
+            if (!Auto_Attack || player == null) return;
+            AbilityTrigger attackAbility = player.Ability.attackAbility;
             if (attackAbility == null || attackAbility.IsNullOrInactive()) return;
+
+            // Continuous channel check (e.g. Yubar laser beam): do not disrupt active channel!
+            if (attackAbility.Network_isCasting) return;
+
             if (!attackAbility.CanBeCast()) return;
 
             float range = attackAbility.currentConfig != null ? attackAbility.currentConfig.effectiveRange : 4.5f;
@@ -191,28 +263,43 @@ namespace AutoUseSkill
             Entity target = null;
             try
             {
-                target = ActionAttackMove.FindAttackMoveTarget(Player, Player.agentPosition);
+                target = ActionAttackMove.FindAttackMoveTarget(player, player.agentPosition);
             }
-            catch { }
-
-            // 2. Fallback to closest enemy within range
-            if (target == null || !target.isActive || Player.GetRelation(target) != EntityRelation.Enemy)
+            catch (Exception ex)
             {
-                target = FindClosestEnemy(range);
+                Debug.LogWarning("[AutoUseSkill] FindAttackMoveTarget error: " + ex.Message);
+            }
+
+            // 2. Fallback to cached closest enemy within range
+            if (target == null || !target.isActive || player.GetRelation(target) != EntityRelation.Enemy)
+            {
+                if (closestEnemy != null && closestEnemy.isActive)
+                {
+                    float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
+                    if (dSq <= range * range)
+                    {
+                        target = closestEnemy;
+                    }
+                }
             }
 
             if (target == null || !target.isActive) return;
 
-            // 3. Clear movement and issue server attack command
-            Player.Control.CmdClearMovement();
-            Player.Control.CmdAttack(target, true);
+            // Range validation
+            if (attackAbility.currentConfig != null && !attackAbility.currentConfig.CheckRange(player, target))
+            {
+                return;
+            }
 
-            // 4. Also trigger immediate attack cast on server
+            // 3. Issue single native server attack command without canceling movement (cancelMovement = false)
             try
             {
-                Player.Control.CmdCast(attackAbility, attackAbility.currentConfigIndex, new CastInfo(Player, target), true, false);
+                player.Control.CmdAttack(target, false);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[AutoUseSkill] CmdAttack error: " + ex.Message);
+            }
         }
 
         private void DrawSkillBadges()
@@ -244,6 +331,17 @@ namespace AutoUseSkill
                     if (slot >= 0 && slot < 4)
                     {
                         Vector3 pos = btn.icon != null ? btn.icon.transform.position : btn.transform.position;
+
+                        if (cachedCanvas == null)
+                        {
+                            cachedCanvas = btn.GetComponentInParent<Canvas>();
+                        }
+
+                        if (cachedCanvas != null && cachedCanvas.renderMode != RenderMode.ScreenSpaceOverlay && cachedCanvas.worldCamera != null)
+                        {
+                            pos = RectTransformUtility.WorldToScreenPoint(cachedCanvas.worldCamera, pos);
+                        }
+
                         float cx = pos.x;
                         float cy = Screen.height - pos.y;
                         float halfH = 28f;
@@ -283,9 +381,9 @@ namespace AutoUseSkill
                     GUI.color = oldCol;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Never throw or stall inside OnGUI
+                Debug.LogWarning("[AutoUseSkill] DrawSkillBadges error: " + ex.Message);
             }
         }
 
@@ -296,7 +394,7 @@ namespace AutoUseSkill
             {
                 if (ShowGUI)
                 {
-                    WindowRect = GUILayout.Window(9999, WindowRect, MenuGui, "Auto Use Skill", "box");
+                    WindowRect = GUILayout.Window(WindowId, WindowRect, MenuGui, "Auto Use Skill", "box");
                 }
                 return;
             }
@@ -315,7 +413,7 @@ namespace AutoUseSkill
 
             // 3. Settings window
             if (!ShowGUI) return;
-            WindowRect = GUILayout.Window(9999, WindowRect, MenuGui, "Auto Use Skill", "box");
+            WindowRect = GUILayout.Window(WindowId, WindowRect, MenuGui, "Auto Use Skill", "box");
         }
 
         private void MenuGui(int id)
@@ -335,7 +433,7 @@ namespace AutoUseSkill
             AutoUseDict[3] = GUILayout.Toggle(AutoUseDict[3], "R (F4)", option);
             GUILayout.EndHorizontal();
             GUILayout.Label("检测间隔 (Interval): " + SearchInterval.ToString("0.00") + "s", option);
-            SearchInterval = Math.Round(GUILayout.HorizontalSlider((float)SearchInterval, 0.01f, 0.5f, option), 2);
+            SearchInterval = (float)Math.Round(GUILayout.HorizontalSlider(SearchInterval, 0.03f, 0.5f, option), 2);
             GUILayout.EndVertical();
         }
 
