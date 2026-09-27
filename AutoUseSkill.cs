@@ -20,6 +20,21 @@ namespace AutoUseSkill
         private float feedbackEndTime = 0f;
         private GUIStyle badgeStyle;
 
+        private static bool IsInPlayGame
+        {
+            get
+            {
+                try
+                {
+                    return PlayGameManager.instance != null;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
         private static Hero Player
         {
             get
@@ -59,6 +74,9 @@ namespace AutoUseSkill
         {
             if (Input.GetKeyDown(OpenMenuKey))
                 ShowGUI = !ShowGUI;
+
+            // Only run combat controls and detection during active gameplay
+            if (!IsInPlayGame) return;
 
             if (Input.GetKeyDown(KeyCode.F1))
             {
@@ -156,19 +174,13 @@ namespace AutoUseSkill
             GUI.backgroundColor = oldBg;
         }
 
-        private void OnGUI()
+        private void DrawSkillBadges()
         {
-            InitStyles();
-
-            // 1. Toast floating feedback banner (1.5 seconds)
-            if (Time.time < feedbackEndTime && !string.IsNullOrEmpty(feedbackText))
+            try
             {
-                GUI.Box(new Rect(Screen.width * 0.38f, 15f, Screen.width * 0.24f, 32f), feedbackText);
-            }
+                if (ManagerBase<UI_InGame_SkillButtons>.instance == null || ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons == null)
+                    return;
 
-            // 2. Persistent ON/OFF badges directly on in-game skill icons
-            if (ManagerBase<UI_InGame_SkillButtons>.instance != null && ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons != null)
-            {
                 UI_InGame_SkillButton[] skillBtns = ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons;
                 Vector3 firstPos = Vector3.zero;
                 float firstHalfH = 28f;
@@ -222,6 +234,38 @@ namespace AutoUseSkill
                     Rect atkRect = new Rect(qx - 66f, qy - firstHalfH + 4f, 58f, 18f);
                     DrawBadge(atkRect, Auto_Attack, Auto_Attack ? "普攻 ON" : "普攻 OFF");
                 }
+            }
+            catch
+            {
+                // Never let GUI exceptions crash or stall rendering
+            }
+        }
+
+        private void OnGUI()
+        {
+            // If in Lobby, Traveler Settings, or Main Menu: NEVER run badge checks or layout
+            if (!IsInPlayGame)
+            {
+                if (ShowGUI)
+                {
+                    WindowRect = GUILayout.Window(9999, WindowRect, MenuGui, "Auto Use Skill", "box");
+                }
+                return;
+            }
+
+            InitStyles();
+
+            // 1. Toast floating feedback banner (1.5 seconds)
+            if (Time.time < feedbackEndTime && !string.IsNullOrEmpty(feedbackText))
+            {
+                GUI.Box(new Rect(Screen.width * 0.38f, 15f, Screen.width * 0.24f, 32f), feedbackText);
+            }
+
+            // 2. Persistent ON/OFF badges directly on in-game skill icons
+            // CRITICAL OPTIMIZATION: Only draw during Repaint event to eliminate layout lag completely!
+            if (Event.current.type == EventType.Repaint)
+            {
+                DrawSkillBadges();
             }
 
             // 3. Settings window
