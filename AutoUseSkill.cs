@@ -112,6 +112,37 @@ namespace AutoUseSkill
             TryAutoAttack();
         }
 
+        private Entity FindClosestEnemy(float maxRange)
+        {
+            if (Player == null) return null;
+            Entity closest = null;
+            float minDistSq = maxRange * maxRange;
+            Vector3 playerPos = Player.agentPosition;
+
+            try
+            {
+                if (NetworkedManagerBase<ActorManager>.instance != null && NetworkedManagerBase<ActorManager>.instance.allEntities != null)
+                {
+                    foreach (Entity e in NetworkedManagerBase<ActorManager>.instance.allEntities)
+                    {
+                        if (e == null || !e.isActive) continue;
+                        if (Player.GetRelation(e) != EntityRelation.Enemy) continue;
+                        if (e.Status != null && e.Status.isUndetectableByNonAllies) continue;
+
+                        float dSq = (e.agentPosition - playerPos).sqrMagnitude;
+                        if (dSq < minDistSq)
+                        {
+                            minDistSq = dSq;
+                            closest = e;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return closest;
+        }
+
         private void TryAutoCastSkill()
         {
             for (var i = 0; i <= 3; i++)
@@ -122,36 +153,50 @@ namespace AutoUseSkill
                 SkillTrigger skill = abilityTrigger as SkillTrigger;
                 if (skill == null) continue;
                 if (!skill.CanBeCast()) continue;
-                var shouldCast = true;
-                switch (skill.currentConfig.castMethod.type)
+
+                float range = skill.currentConfig != null ? skill.currentConfig.effectiveRange : 8f;
+                Entity target = controlManager.targetEnemy;
+                if (target == null || !target.isActive || Player.GetRelation(target) != EntityRelation.Enemy)
                 {
-                    case CastMethodType.Cone:
-                    case CastMethodType.Arrow:
-                        if (controlManager.targetEnemy == null || !skill.currentConfig.CheckRange(Player, controlManager.targetEnemy)) shouldCast = false;
-                        break;
-                    case CastMethodType.Target:
-                        if ((skill.currentConfig.targetValidator.targets & EntityRelation.Self) == 0)
-                        {
-                            if (controlManager.targetEnemy == null || !skill.currentConfig.CheckRange(Player, controlManager.targetEnemy)) shouldCast = false;
-                        }
-                        break;
-                    case CastMethodType.None:
-                    case CastMethodType.Point:
-                    default:
-                        break;
+                    target = FindClosestEnemy(range);
                 }
 
-                if (shouldCast) controlManager.CastAbilityAuto(skill);
+                if (target != null && skill.currentConfig != null && !skill.currentConfig.CheckRange(Player, target))
+                {
+                    continue;
+                }
+
+                if (target != null)
+                {
+                    controlManager.CastAbility(skill, new CastInfo(Player, target), false);
+                }
+                else
+                {
+                    controlManager.CastAbilityAuto(skill);
+                }
             }
         }
 
         private void TryAutoAttack()
         {
-            if (!Auto_Attack) return;
-            AttackTrigger attackAbility = Player.Ability.attackAbility as AttackTrigger;
+            if (!Auto_Attack || Player == null) return;
+            AbilityTrigger attackAbility = Player.Ability.attackAbility;
             if (attackAbility == null || attackAbility.IsNullOrInactive()) return;
-            if (controlManager.targetEnemy == null || !attackAbility.currentConfig.CheckRange(Player, controlManager.targetEnemy)) return;
-            Player.Control.CmdAttack(controlManager.targetEnemy, false);
+            if (!attackAbility.CanBeCast()) return;
+
+            float range = attackAbility.currentConfig != null ? attackAbility.currentConfig.effectiveRange : 4.5f;
+            if (range < 2.5f) range = 2.5f;
+
+            Entity target = controlManager.targetEnemy;
+            if (target == null || !target.isActive || Player.GetRelation(target) != EntityRelation.Enemy)
+            {
+                target = FindClosestEnemy(range);
+            }
+
+            if (target == null) return;
+            if (attackAbility.currentConfig != null && !attackAbility.currentConfig.CheckRange(Player, target)) return;
+
+            controlManager.CastAbility(attackAbility, new CastInfo(Player, target), false);
         }
 
         private void DrawSkillBadges()
