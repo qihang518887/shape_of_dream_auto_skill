@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace AutoUseSkill
 {
@@ -18,15 +19,15 @@ namespace AutoUseSkill
 
         private string feedbackText = "";
         private float feedbackEndTime = 0f;
-        private GUIStyle badgeStyle;
 
-        private static bool IsInPlayGame
+        private static bool IsInCombatRoom
         {
             get
             {
                 try
                 {
-                    return PlayGameManager.instance != null;
+                    string sceneName = SceneManager.GetActiveScene().name;
+                    return sceneName != null && sceneName.StartsWith("Room_");
                 }
                 catch
                 {
@@ -75,8 +76,8 @@ namespace AutoUseSkill
             if (Input.GetKeyDown(OpenMenuKey))
                 ShowGUI = !ShowGUI;
 
-            // Only run combat controls and detection during active gameplay
-            if (!IsInPlayGame) return;
+            // Zero overhead when outside actual combat rooms (in Lobby, Traveler settings, Title, etc.)
+            if (!IsInCombatRoom) return;
 
             if (Input.GetKeyDown(KeyCode.F1))
             {
@@ -153,27 +154,6 @@ namespace AutoUseSkill
             Player.Control.CmdAttack(controlManager.targetEnemy, false);
         }
 
-        private void InitStyles()
-        {
-            if (badgeStyle == null)
-            {
-                badgeStyle = new GUIStyle(GUI.skin.box);
-                badgeStyle.alignment = TextAnchor.MiddleCenter;
-                badgeStyle.fontSize = 11;
-                badgeStyle.richText = true;
-                badgeStyle.padding = new RectOffset(0, 0, 0, 0);
-                badgeStyle.margin = new RectOffset(0, 0, 0, 0);
-            }
-        }
-
-        private void DrawBadge(Rect rect, bool isOn, string label)
-        {
-            Color oldBg = GUI.backgroundColor;
-            GUI.backgroundColor = isOn ? new Color(0.1f, 0.85f, 0.2f, 0.92f) : new Color(0.85f, 0.15f, 0.15f, 0.92f);
-            GUI.Box(rect, "<b>" + label + "</b>", badgeStyle);
-            GUI.backgroundColor = oldBg;
-        }
-
         private void DrawSkillBadges()
         {
             try
@@ -222,7 +202,11 @@ namespace AutoUseSkill
 
                         // Badge positioned neatly inside the skill icon near the top
                         Rect badgeRect = new Rect(cx - 17f, cy - halfH + 4f, 34f, 16f);
-                        DrawBadge(badgeRect, AutoUseDict[slot], AutoUseDict[slot] ? "ON" : "OFF");
+                        bool isSkillOn = AutoUseDict[slot];
+                        Color oldCol = GUI.color;
+                        GUI.color = isSkillOn ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
+                        GUI.Box(badgeRect, isSkillOn ? "ON" : "OFF");
+                        GUI.color = oldCol;
                     }
                 }
 
@@ -232,19 +216,22 @@ namespace AutoUseSkill
                     float qx = firstPos.x;
                     float qy = Screen.height - firstPos.y;
                     Rect atkRect = new Rect(qx - 66f, qy - firstHalfH + 4f, 58f, 18f);
-                    DrawBadge(atkRect, Auto_Attack, Auto_Attack ? "普攻 ON" : "普攻 OFF");
+                    Color oldCol = GUI.color;
+                    GUI.color = Auto_Attack ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
+                    GUI.Box(atkRect, Auto_Attack ? "普攻 ON" : "普攻 OFF");
+                    GUI.color = oldCol;
                 }
             }
             catch
             {
-                // Never let GUI exceptions crash or stall rendering
+                // Never throw or stall inside OnGUI
             }
         }
 
         private void OnGUI()
         {
-            // If in Lobby, Traveler Settings, or Main Menu: NEVER run badge checks or layout
-            if (!IsInPlayGame)
+            // If in Lobby, Traveler Settings, Constellations, or Main Menu: NEVER run badge checks or layout!
+            if (!IsInCombatRoom)
             {
                 if (ShowGUI)
                 {
@@ -253,16 +240,13 @@ namespace AutoUseSkill
                 return;
             }
 
-            InitStyles();
-
             // 1. Toast floating feedback banner (1.5 seconds)
             if (Time.time < feedbackEndTime && !string.IsNullOrEmpty(feedbackText))
             {
                 GUI.Box(new Rect(Screen.width * 0.38f, 15f, Screen.width * 0.24f, 32f), feedbackText);
             }
 
-            // 2. Persistent ON/OFF badges directly on in-game skill icons
-            // CRITICAL OPTIMIZATION: Only draw during Repaint event to eliminate layout lag completely!
+            // 2. Persistent ON/OFF badges directly on in-game skill icons (only during Repaint)
             if (Event.current.type == EventType.Repaint)
             {
                 DrawSkillBadges();
