@@ -212,11 +212,11 @@ namespace AutoUseSkill
                 {
                     foreach (Entity e in NetworkedManagerBase<ActorManager>.instance.allEntities)
                     {
-                        if (e == null || !e.isActive) continue;
+                        if (e == null || !e.isActive || !e.isAlive || e.isDead) continue;
+                        if (e.Status != null && (e.Status.isDead || e.Status.isUndetectableByNonAllies)) continue;
 
                         if (player.GetRelation(e) == EntityRelation.Enemy)
                         {
-                            if (e.Status != null && e.Status.isUndetectableByNonAllies) continue;
                             float dSq = (e.agentPosition - playerPos).sqrMagnitude;
                             if (dSq < minEnemyDistSq)
                             {
@@ -240,6 +240,44 @@ namespace AutoUseSkill
             {
                 Debug.LogWarning("[AutoUseSkill] FindClosestTargets error: " + ex.Message);
             }
+        }
+
+        private Entity FindClosestValidEnemy(Hero player, TriggerConfig config, float maxRange = 25f)
+        {
+            if (player == null || config == null) return null;
+            Entity bestEnemy = null;
+            float minDistSq = maxRange * maxRange;
+            Vector3 playerPos = player.agentPosition;
+
+            try
+            {
+                var actorMgr = NetworkedManagerBase<ActorManager>.instance;
+                if (actorMgr != null && actorMgr.allEntities != null)
+                {
+                    foreach (Entity e in actorMgr.allEntities)
+                    {
+                        if (e == null || !e.isActive || !e.isAlive || e.isDead) continue;
+                        if (e.Status != null && (e.Status.isDead || e.Status.isUndetectableByNonAllies)) continue;
+                        if (player.GetRelation(e) != EntityRelation.Enemy) continue;
+
+                        if (config.targetValidator != null && !config.targetValidator.Evaluate(player, e)) continue;
+                        if (!config.CheckRange(player, e)) continue;
+
+                        float dSq = (e.agentPosition - playerPos).sqrMagnitude;
+                        if (dSq < minDistSq)
+                        {
+                            minDistSq = dSq;
+                            bestEnemy = e;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[AutoUseSkill] FindClosestValidEnemy error: " + ex.Message);
+            }
+
+            return bestEnemy;
         }
 
         private void TryAutoCastSkill(Hero player, ControlManager cm, Entity closestEnemy)
@@ -311,40 +349,33 @@ namespace AutoUseSkill
                     // === CASE 2: Offensive Skills (targeting Enemy) ===
                     Entity enemyTarget = null;
 
-                    // 1. Check manually selected / aimed enemy target
-                    if (cm.targetEnemy != null && cm.targetEnemy.isActive && cm.targetEnemy.isAlive && player.GetRelation(cm.targetEnemy) == EntityRelation.Enemy)
+                    // 1. Prefer closest living enemy if valid for this skill and within range
+                    if (closestEnemy != null && (config.targetValidator == null || config.targetValidator.Evaluate(player, closestEnemy)) && config.CheckRange(player, closestEnemy))
                     {
-                        if (config.CheckRange(player, cm.targetEnemy))
-                        {
-                            enemyTarget = cm.targetEnemy;
-                        }
+                        enemyTarget = closestEnemy;
                     }
-
-                    // 2. Fallback to closest enemy within this skill's effective range
-                    if (enemyTarget == null && closestEnemy != null && closestEnemy.isActive && closestEnemy.isAlive)
+                    else
                     {
-                        if (config.CheckRange(player, closestEnemy))
-                        {
-                            enemyTarget = closestEnemy;
-                        }
+                        // 2. Otherwise search for the closest living enemy that satisfies this skill's validator and range
+                        enemyTarget = FindClosestValidEnemy(player, config, 25f);
                     }
 
                     // If an enemy is in effective range: cast offensive skill at enemy
                     if (enemyTarget != null)
                     {
-                        if (castType == CastMethodType.Point)
+                        if (castType == CastMethodType.Cone || castType == CastMethodType.Arrow)
+                        {
+                            // Directional skillshot -> aim at enemy with computed angle (fixes firing straight up)
+                            cm.CastAbility(skill, skill.GetCastInfoToTarget(enemyTarget), false);
+                        }
+                        else if (castType == CastMethodType.Point)
                         {
                             // Ground-targeted offensive AOE (meteor, lightning) -> place at enemy position
-                            cm.CastAbility(skill, new CastInfo(player, enemyTarget.agentPosition), false);
+                            cm.CastAbility(skill, skill.GetCastInfoToTarget(enemyTarget), false);
                         }
                         else if (castType == CastMethodType.Target)
                         {
                             // Targeted offensive spell -> target enemy
-                            cm.CastAbility(skill, new CastInfo(player, enemyTarget), false);
-                        }
-                        else if (castType == CastMethodType.Cone || castType == CastMethodType.Arrow)
-                        {
-                            // Directional skillshot -> aim at enemy
                             cm.CastAbility(skill, new CastInfo(player, enemyTarget), false);
                         }
                         else if (castType == CastMethodType.None)

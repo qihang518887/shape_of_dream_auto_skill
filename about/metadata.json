@@ -1,9 +1,9 @@
-﻿{
+{
   "supportedGameVer": [
     "*"
   ],
   "author": "Death (Adapted for DewMod)",
-  "modVer": "1.0.2",
+  "modVer": "1.0.3",
   "id": "me.death.autouseskill",
   "name": "AutoUseSkill",
   "assemblies": [
