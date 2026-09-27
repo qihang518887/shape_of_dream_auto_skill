@@ -187,32 +187,16 @@ namespace AutoUseSkill
             float range = attackAbility.currentConfig != null ? attackAbility.currentConfig.effectiveRange : 4.5f;
             if (range < 2.5f) range = 2.5f;
 
-            // 1. Native attack-move target finder
-            Entity target = null;
-            try
-            {
-                target = ActionAttackMove.FindAttackMoveTarget(Player, Player.agentPosition);
-            }
-            catch { }
-
-            // 2. Fallback to closest enemy within range
+            Entity target = controlManager.targetEnemy;
             if (target == null || !target.isActive || Player.GetRelation(target) != EntityRelation.Enemy)
             {
                 target = FindClosestEnemy(range);
             }
 
-            if (target == null || !target.isActive) return;
+            if (target == null) return;
+            if (attackAbility.currentConfig != null && !attackAbility.currentConfig.CheckRange(Player, target)) return;
 
-            // 3. Clear movement and issue server attack command
-            Player.Control.CmdClearMovement();
-            Player.Control.CmdAttack(target, true);
-
-            // 4. Also trigger immediate attack cast on server
-            try
-            {
-                Player.Control.CmdCast(attackAbility, attackAbility.currentConfigIndex, new CastInfo(Player, target), true, false);
-            }
-            catch { }
+            controlManager.CastAbility(attackAbility, new CastInfo(Player, target), false);
         }
 
         private void DrawSkillBadges()
