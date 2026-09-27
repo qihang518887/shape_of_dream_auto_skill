@@ -258,46 +258,125 @@ namespace AutoUseSkill
                 if (skill.Network_isCasting) continue;
                 if (!skill.CanBeCast()) continue;
 
-                float range = skill.currentConfig != null ? skill.currentConfig.effectiveRange : 8f;
-                Entity target = cm.targetEnemy;
+                TriggerConfig config = skill.currentConfig;
+                if (config == null) continue;
 
-                if (target == null || !target.isActive || player.GetRelation(target) != EntityRelation.Enemy)
+                EntityRelation targets = config.targetValidator.targets;
+                bool canTargetSelf = (targets & EntityRelation.Self) != 0;
+                bool canTargetEnemy = (targets & EntityRelation.Enemy) != 0;
+                CastMethodType castType = config.castMethod != null ? config.castMethod.type : CastMethodType.None;
+
+                // Identify if this is a defensive / shield / heal / self-buff skill:
+                // 1. Can target Self but CANNOT target Enemy, OR
+                // 2. Cannot target Enemy and is non-targeted (None) or victim is Caster
+                bool isSelfOrDefensive = false;
+                if (canTargetSelf && !canTargetEnemy)
                 {
-                    if (closestEnemy != null && closestEnemy.isActive)
-                    {
-                        float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
-                        if (dSq <= range * range)
-                        {
-                            target = closestEnemy;
-                        }
-                    }
+                    isSelfOrDefensive = true;
                 }
-
-                if (target != null && skill.currentConfig != null && !skill.currentConfig.CheckRange(player, target))
+                else if (!canTargetEnemy && (castType == CastMethodType.None || config.victim == TriggerConfig.StatusEffectVictimType.Caster))
                 {
-                    continue;
-                }
-
-                // If no enemy target in range, verify whether skill requires a target before casting
-                if (target == null && skill.currentConfig != null && skill.currentConfig.castMethod != null)
-                {
-                    CastMethodType methodType = skill.currentConfig.castMethod.type;
-                    if (methodType == CastMethodType.Target || methodType == CastMethodType.Cone || methodType == CastMethodType.Arrow)
-                    {
-                        // Directional / targeted skills should not fire into empty air
-                        continue;
-                    }
+                    isSelfOrDefensive = true;
                 }
 
                 try
                 {
-                    if (target != null)
+                    // === CASE 1: Shield / Heal / Self-Buff Skills ===
+                    // Must ALWAYS target the player, never a distant enemy!
+                    if (isSelfOrDefensive)
                     {
-                        cm.CastAbility(skill, new CastInfo(player, target), false);
+                        if (castType == CastMethodType.Point)
+                        {
+                            // Ground-targeted defensive dome / healing sanctuary -> place at player's own position
+                            cm.CastAbility(skill, new CastInfo(player, player.agentPosition), false);
+                        }
+                        else if (castType == CastMethodType.Target)
+                        {
+                            // Unit-targeted shield / heal -> cast on player (Self)
+                            cm.CastAbility(skill, new CastInfo(player, player), false);
+                        }
+                        else if (castType == CastMethodType.None)
+                        {
+                            // Instant self-buff / shield
+                            cm.CastAbility(skill, new CastInfo(player), false);
+                        }
+                        else
+                        {
+                            // Directional healing wave or buff
+                            cm.CastAbilityAuto(skill);
+                        }
+                        continue;
+                    }
+
+                    // === CASE 2: Offensive Skills (targeting Enemy) ===
+                    Entity enemyTarget = null;
+
+                    // 1. Check manually selected / aimed enemy target
+                    if (cm.targetEnemy != null && cm.targetEnemy.isActive && cm.targetEnemy.isAlive && player.GetRelation(cm.targetEnemy) == EntityRelation.Enemy)
+                    {
+                        if (config.CheckRange(player, cm.targetEnemy))
+                        {
+                            enemyTarget = cm.targetEnemy;
+                        }
+                    }
+
+                    // 2. Fallback to closest enemy within this skill's effective range
+                    if (enemyTarget == null && closestEnemy != null && closestEnemy.isActive && closestEnemy.isAlive)
+                    {
+                        if (config.CheckRange(player, closestEnemy))
+                        {
+                            enemyTarget = closestEnemy;
+                        }
+                    }
+
+                    // If an enemy is in effective range: cast offensive skill at enemy
+                    if (enemyTarget != null)
+                    {
+                        if (castType == CastMethodType.Point)
+                        {
+                            // Ground-targeted offensive AOE (meteor, lightning) -> place at enemy position
+                            cm.CastAbility(skill, new CastInfo(player, enemyTarget.agentPosition), false);
+                        }
+                        else if (castType == CastMethodType.Target)
+                        {
+                            // Targeted offensive spell -> target enemy
+                            cm.CastAbility(skill, new CastInfo(player, enemyTarget), false);
+                        }
+                        else if (castType == CastMethodType.Cone || castType == CastMethodType.Arrow)
+                        {
+                            // Directional skillshot -> aim at enemy
+                            cm.CastAbility(skill, new CastInfo(player, enemyTarget), false);
+                        }
+                        else if (castType == CastMethodType.None)
+                        {
+                            // PBAoE around player damaging nearby enemy
+                            cm.CastAbility(skill, new CastInfo(player), false);
+                        }
+                        else
+                        {
+                            cm.CastAbilityAuto(skill);
+                        }
                     }
                     else
                     {
-                        cm.CastAbilityAuto(skill);
+                        // No enemy in range:
+                        // If the skill is hybrid and can target Self as a fallback
+                        if (canTargetSelf)
+                        {
+                            if (castType == CastMethodType.Point)
+                            {
+                                cm.CastAbility(skill, new CastInfo(player, player.agentPosition), false);
+                            }
+                            else if (castType == CastMethodType.Target)
+                            {
+                                cm.CastAbility(skill, new CastInfo(player, player), false);
+                            }
+                            else if (castType == CastMethodType.None)
+                            {
+                                cm.CastAbility(skill, new CastInfo(player), false);
+                            }
+                        }
+                        // Pure offensive skill with no enemy in range: DO NOT CAST to preserve cooldown!
                     }
                 }
                 catch (Exception ex)
