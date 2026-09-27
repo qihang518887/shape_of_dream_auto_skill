@@ -13,11 +13,11 @@
 
 - **智能自动施法**：自动检测冷却（CD）、技能有效射程与合法目标（支持单体目标、锥形范围、弹道指向等不同施法类型）。
 - **智能自动普攻**：目标在攻击距离内时自动衔接普通攻击，支持通过快捷键一键启闭。
-- **独立技能快捷键**：局内随时按 F1 ~ F4 独立切换 Q/W/E/R 技能自动释放，按 F5 切换自动普攻。
+- **独立技能快捷键**：局内随时按 F1 ~ F4 独立切换 Q/W/E/R 技能自动释放，按 F5 切换自动普攻，按 F6 切换自动击碎矿石/金币罐。
 - **技能图标常驻状态显示**：在游戏技能栏各个图标内常驻显示醒目的状态标签：
   - 开启时显示绿色 **ON** 标签
   - 关闭时显示红色 **OFF** 标签
-  - 自动普攻在技能栏左侧常驻显示 **普攻 ON / OFF**
+  - 自动普攻与自动敲矿在技能栏左侧常驻显示 **普攻 ON / OFF** 与 **敲矿 ON / OFF**
 - **局内图形化设置**：按 I 键随时呼出/关闭浮动设置菜单，支持调整技能开关、脱战施法以及检测频率滑条。
 - **轻量零依赖**：完全依赖游戏底层组件，性能开销极低。
 
@@ -30,6 +30,7 @@
 | **F3** | 切换 **E 技能** 自动释放（开 / 关） | 绿色 ON / 红色 OFF |
 | **F4** | 切换 **R 技能** 自动释放（开 / 关） | 绿色 ON / 红色 OFF |
 | **F5** | 切换 **自动普通攻击**（开 / 关） | 绿色 普攻 ON / 红色 普攻 OFF |
+| **F6** | 切换 **自动击碎矿石/金币罐**（开 / 关） | 绿色 敲矿 ON / 红色 敲矿 OFF |
 | **I** | 打开 / 关闭图形化设置窗口 | — |
 
 > **提示**：若开启了游戏设置中的【开发者模式】，在控制台（~ 键）输入 utoskill 也可调出设置窗口。
@@ -67,11 +68,11 @@ A native Quality-of-Life (QoL) mod for the action roguelike *Shape of Dreams*. B
 
 - **Smart Auto-Cast**: Automatically verifies cooldowns, effective skill ranges, and target validators (supports Cone, Arrow, Target, and Point cast methods).
 - **Smart Auto-Attack**: Automatically executes basic attacks when an enemy is within attack range, easily toggled on/off.
-- **Individual Hotkeys**: Toggle auto-casting for Q/W/E/R independently in real-time (F1–F4), and auto-attack via F5.
+- **Individual Hotkeys**: Toggle auto-casting for Q/W/E/R independently in real-time (F1–F4), and auto-attack via F5, and auto-break resource props via F6.
 - **Persistent In-Icon Badges**: Permanent, high-contrast badges displayed directly inside each skill icon:
   - Green **ON** when enabled
   - Red **OFF** when disabled
-  - Auto-attack badge (普攻 ON / OFF) displayed beside the skill bar.
+  - Auto-attack & Auto-break badges (普攻 ON / OFF, 敲矿 ON / OFF) displayed beside the skill bar.
 - **In-Game GUI**: Press I to toggle a draggable configuration window to adjust toggles, out-of-combat casting, and detection interval.
 - **Zero Overhead**: Clean, pure implementation directly interfacing with Dew.Core without external mod loaders.
 
@@ -84,6 +85,7 @@ A native Quality-of-Life (QoL) mod for the action roguelike *Shape of Dreams*. B
 | **F3** | Toggle auto-cast for **Skill 3 (E)** | Green ON / Red OFF |
 | **F4** | Toggle auto-cast for **Skill 4 (R)** | Green ON / Red OFF |
 | **F5** | Toggle **Auto-Attack** | Green 普攻 ON / Red 普攻 OFF |
+| **F6** | Toggle **Auto-Break Props (Dust/Gold)** | Green 敲矿 ON / Red 敲矿 OFF |
 | **I** | Toggle settings window on / off | — |
 
 > **Note**: If Developer Mode is enabled in settings, you can also type utoskill in the debug console (~) to toggle the GUI.

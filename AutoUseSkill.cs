@@ -14,6 +14,7 @@ namespace AutoUseSkill
         private float ButtonHeight = 0.035f;
         private Rect WindowRect;
         private bool Auto_Attack;
+        private bool Auto_Attack_Props = true;
         private bool[] AutoUseDict = new bool[4];
         private float lastSearchTime = 0f;
         private float SearchInterval = 0.05f;
@@ -50,7 +51,7 @@ namespace AutoUseSkill
         {
             Debug.Log("[AutoUseSkill] Mod loaded successfully!");
             // Dynamic window height calculated by GUILayout
-            WindowRect = new Rect(Screen.width * 0.4f, Screen.height * 0.4f, Screen.width * 0.25f, 0f);
+            WindowRect = new Rect(Screen.width * 0.35f, Screen.height * 0.4f, Screen.width * 0.30f, 0f);
             UpdateCombatRoomStatus(SceneManager.GetActiveScene());
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
         }
@@ -60,6 +61,7 @@ namespace AutoUseSkill
             SceneManager.activeSceneChanged -= OnActiveSceneChanged;
             ShowGUI = false;
             Auto_Attack = false;
+            Auto_Attack_Props = true;
             if (AutoUseDict != null)
             {
                 for (int i = 0; i < AutoUseDict.Length; i++)
@@ -97,6 +99,28 @@ namespace AutoUseSkill
             feedbackEndTime = Time.time + 1.5f;
         }
 
+        private static bool IsAttackableProp(Entity e)
+        {
+            if (e == null || !e.isActive || !e.isAlive || e.isDead) return false;
+            if (e.Status != null && e.Status.isDead) return false;
+
+            // Known breakable resource objects first (Dream Dust, Gold Pots, Nightmare Stones)
+            if (e is PropEnt_Stone_DreamDust || e is PropEnt_Stone_Gold || e is PropEnt_Stone_Nightmare)
+                return true;
+
+            // Never attack merchants, shopkeepers, or interactable NPCs
+            if (e is PropEnt_Merchant_Base || e is PropEnt_Merchant_Backpack || e is IInteractable)
+                return false;
+
+            // Generic destructible props (excluding players, monsters, summons)
+            if (e is PropEntity && !(e is Monster) && !(e is Hero) && !(e is Summon))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private void Update()
         {
             if (Input.GetKeyDown(OpenMenuKey))
@@ -130,27 +154,56 @@ namespace AutoUseSkill
                 Auto_Attack = !Auto_Attack;
                 ShowFeedback(string.Format("自动普通攻击: {0}", Auto_Attack ? "开启 (ON)" : "关闭 (OFF)"));
             }
+            if (Input.GetKeyDown(KeyCode.F6))
+            {
+                Auto_Attack_Props = !Auto_Attack_Props;
+                ShowFeedback(string.Format("自动击碎矿石/金币罐: {0}", Auto_Attack_Props ? "开启 (ON)" : "关闭 (OFF)"));
+            }
 
             // Local cache to guard against TOCTOU null reference
             Hero player = Player;
-            if (player == null || (!AutoCastOutOfCombat && !player.isInCombat)) return;
+            if (player == null) return;
+
+            bool canCastSkill = AutoCastOutOfCombat || player.isInCombat;
+            bool canAttack = Auto_Attack || Auto_Attack_Props;
+            if (!canCastSkill && !canAttack) return;
+
             if (Time.time - lastSearchTime < SearchInterval) return;
             lastSearchTime = Time.time;
 
             ControlManager cm = controlManager;
 
-            // Single search for closest enemy per interval to optimize performance
-            Entity closestEnemy = FindClosestEnemy(player, 25f);
+            // Determine hero attack range for prop scanning
+            float attackRange = 4.5f;
+            if (player.Ability != null && player.Ability.attackAbility != null && player.Ability.attackAbility.currentConfig != null)
+            {
+                attackRange = player.Ability.attackAbility.currentConfig.effectiveRange;
+            }
+            if (attackRange < 2.5f) attackRange = 2.5f;
 
-            TryAutoCastSkill(player, cm, closestEnemy);
-            TryAutoAttack(player, closestEnemy);
+            // Single pass search for closest enemy (up to 25m for skills) and closest prop (within attack range + 2m)
+            Entity closestEnemy;
+            Entity closestProp;
+            FindClosestTargets(player, 25f, attackRange + 2f, out closestEnemy, out closestProp);
+
+            if (canCastSkill)
+            {
+                TryAutoCastSkill(player, cm, closestEnemy);
+            }
+            if (canAttack)
+            {
+                TryAutoAttack(player, closestEnemy, closestProp, attackRange);
+            }
         }
 
-        private Entity FindClosestEnemy(Hero player, float maxRange)
+        private void FindClosestTargets(Hero player, float maxEnemyRange, float maxPropRange, out Entity closestEnemy, out Entity closestProp)
         {
-            if (player == null) return null;
-            Entity closest = null;
-            float minDistSq = maxRange * maxRange;
+            closestEnemy = null;
+            closestProp = null;
+            if (player == null) return;
+
+            float minEnemyDistSq = maxEnemyRange * maxEnemyRange;
+            float minPropDistSq = maxPropRange * maxPropRange;
             Vector3 playerPos = player.agentPosition;
 
             try
@@ -160,24 +213,33 @@ namespace AutoUseSkill
                     foreach (Entity e in NetworkedManagerBase<ActorManager>.instance.allEntities)
                     {
                         if (e == null || !e.isActive) continue;
-                        if (player.GetRelation(e) != EntityRelation.Enemy) continue;
-                        if (e.Status != null && e.Status.isUndetectableByNonAllies) continue;
 
-                        float dSq = (e.agentPosition - playerPos).sqrMagnitude;
-                        if (dSq < minDistSq)
+                        if (player.GetRelation(e) == EntityRelation.Enemy)
                         {
-                            minDistSq = dSq;
-                            closest = e;
+                            if (e.Status != null && e.Status.isUndetectableByNonAllies) continue;
+                            float dSq = (e.agentPosition - playerPos).sqrMagnitude;
+                            if (dSq < minEnemyDistSq)
+                            {
+                                minEnemyDistSq = dSq;
+                                closestEnemy = e;
+                            }
+                        }
+                        else if (Auto_Attack_Props && IsAttackableProp(e))
+                        {
+                            float dSq = (e.agentPosition - playerPos).sqrMagnitude;
+                            if (dSq < minPropDistSq)
+                            {
+                                minPropDistSq = dSq;
+                                closestProp = e;
+                            }
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogWarning("[AutoUseSkill] FindClosestEnemy error: " + ex.Message);
+                Debug.LogWarning("[AutoUseSkill] FindClosestTargets error: " + ex.Message);
             }
-
-            return closest;
         }
 
         private void TryAutoCastSkill(Hero player, ControlManager cm, Entity closestEnemy)
@@ -245,9 +307,9 @@ namespace AutoUseSkill
             }
         }
 
-        private void TryAutoAttack(Hero player, Entity closestEnemy)
+        private void TryAutoAttack(Hero player, Entity closestEnemy, Entity closestProp, float attackRange)
         {
-            if (!Auto_Attack || player == null) return;
+            if ((!Auto_Attack && !Auto_Attack_Props) || player == null) return;
             AbilityTrigger attackAbility = player.Ability.attackAbility;
             if (attackAbility == null || attackAbility.IsNullOrInactive()) return;
 
@@ -256,34 +318,46 @@ namespace AutoUseSkill
 
             if (!attackAbility.CanBeCast()) return;
 
-            float range = attackAbility.currentConfig != null ? attackAbility.currentConfig.effectiveRange : 4.5f;
-            if (range < 2.5f) range = 2.5f;
-
-            // 1. Native attack-move target finder
             Entity target = null;
-            try
-            {
-                target = ActionAttackMove.FindAttackMoveTarget(player, player.agentPosition);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[AutoUseSkill] FindAttackMoveTarget error: " + ex.Message);
-            }
 
-            // 2. Fallback to cached closest enemy within range
-            if (target == null || !target.isActive || player.GetRelation(target) != EntityRelation.Enemy)
+            // 1. If Auto_Attack is enabled: search for aggressive enemies first
+            if (Auto_Attack)
             {
-                if (closestEnemy != null && closestEnemy.isActive)
+                // 1a. Native attack-move target finder (prioritizes aggressive enemies)
+                try
                 {
-                    float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
-                    if (dSq <= range * range)
+                    target = ActionAttackMove.FindAttackMoveTarget(player, player.agentPosition);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[AutoUseSkill] FindAttackMoveTarget error: " + ex.Message);
+                }
+
+                // 1b. Fallback to closest enemy within attack range
+                if (target == null || !target.isActive || !target.isAlive || player.GetRelation(target) != EntityRelation.Enemy)
+                {
+                    if (closestEnemy != null && closestEnemy.isActive && closestEnemy.isAlive)
                     {
-                        target = closestEnemy;
+                        float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
+                        if (dSq <= attackRange * attackRange)
+                        {
+                            target = closestEnemy;
+                        }
                     }
                 }
             }
 
-            if (target == null || !target.isActive) return;
+            // 2. Priority 2: If no enemies are within attack range, auto-target nearest destructible prop (Dream Dust, Gold Pot, etc.)
+            if (target == null && Auto_Attack_Props && closestProp != null && closestProp.isActive && closestProp.isAlive)
+            {
+                float dSq = (closestProp.agentPosition - player.agentPosition).sqrMagnitude;
+                if (dSq <= attackRange * attackRange)
+                {
+                    target = closestProp;
+                }
+            }
+
+            if (target == null || !target.isActive || !target.isAlive) return;
 
             // Range validation
             if (attackAbility.currentConfig != null && !attackAbility.currentConfig.CheckRange(player, target))
@@ -374,10 +448,17 @@ namespace AutoUseSkill
                     // Draw Auto Attack badge to the left of Q skill button
                     float qx = firstPos.x;
                     float qy = Screen.height - firstPos.y;
-                    Rect atkRect = new Rect(qx - 66f, qy - firstHalfH + 4f, 58f, 18f);
                     Color oldCol = GUI.color;
+
+                    Rect atkRect = new Rect(qx - 66f, qy - firstHalfH + 4f, 58f, 18f);
                     GUI.color = Auto_Attack ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
                     GUI.Box(atkRect, Auto_Attack ? "普攻 ON" : "普攻 OFF");
+
+                    // Draw Auto Attack Props badge to the left of Auto Attack badge
+                    Rect propRect = new Rect(qx - 130f, qy - firstHalfH + 4f, 60f, 18f);
+                    GUI.color = Auto_Attack_Props ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
+                    GUI.Box(propRect, Auto_Attack_Props ? "敲矿 ON" : "敲矿 OFF");
+
                     GUI.color = oldCol;
                 }
             }
@@ -423,8 +504,9 @@ namespace AutoUseSkill
             GUILayout.BeginVertical();
             GUILayout.Label("", option);
             GUILayout.BeginHorizontal();
-            AutoCastOutOfCombat = GUILayout.Toggle(AutoCastOutOfCombat, "脱战施法 (Out Of Combat)", option);
+            AutoCastOutOfCombat = GUILayout.Toggle(AutoCastOutOfCombat, "脱战施法", option);
             Auto_Attack = GUILayout.Toggle(Auto_Attack, "自动普攻 (F5)", option);
+            Auto_Attack_Props = GUILayout.Toggle(Auto_Attack_Props, "自动敲矿/罐 (F6)", option);
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             AutoUseDict[0] = GUILayout.Toggle(AutoUseDict[0], "Q (F1)", option);
