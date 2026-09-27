@@ -1,6 +1,6 @@
 ﻿自动使用技能与自动普通攻击 Mod (Auto Use Skill & Auto Attack)
 快捷键说明：
 - I 键：打开/关闭设置菜单
-- O 键：自动施法总开关
-- F1 / F2 / F3 / F4：独立开关 Q / W / E / R 技能的自动释放
+- F1 / F2 / F3 / F4：独立开关 Q / W / E / R 技能自动释放（技能图标内有常驻 ON / OFF 提示）
+- F5：开关自动普通攻击（常驻 ON / OFF 提示）
 原作者: Death (Adapted for DewMod)

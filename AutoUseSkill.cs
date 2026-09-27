@@ -6,10 +6,8 @@ namespace AutoUseSkill
 {
     public class AutoUseSkill : ModBehaviour
     {
-        private bool ModEnabled = true;
         private bool AutoCastOutOfCombat;
         private bool ShowGUI;
-        private KeyCode EnableKey = KeyCode.O;
         private KeyCode OpenMenuKey = KeyCode.I;
         private float ButtonHeight = 0.035f;
         private Rect WindowRect;
@@ -20,6 +18,7 @@ namespace AutoUseSkill
 
         private string feedbackText = "";
         private float feedbackEndTime = 0f;
+        private GUIStyle badgeStyle;
 
         private static Hero Player
         {
@@ -47,7 +46,6 @@ namespace AutoUseSkill
         private void OnDestroy()
         {
             ShowGUI = false;
-            ModEnabled = false;
             Debug.Log("[AutoUseSkill] Mod unloaded.");
         }
 
@@ -61,12 +59,6 @@ namespace AutoUseSkill
         {
             if (Input.GetKeyDown(OpenMenuKey))
                 ShowGUI = !ShowGUI;
-
-            if (Input.GetKeyDown(EnableKey))
-            {
-                ModEnabled = !ModEnabled;
-                ShowFeedback("自动施法总开关: " + (ModEnabled ? "开启 (ON)" : "关闭 (OFF)"));
-            }
 
             if (Input.GetKeyDown(KeyCode.F1))
             {
@@ -88,8 +80,13 @@ namespace AutoUseSkill
                 AutoUseDict[3] = !AutoUseDict[3];
                 ShowFeedback("R 技能自动释放: " + (AutoUseDict[3] ? "开启 (ON)" : "关闭 (OFF)"));
             }
+            if (Input.GetKeyDown(KeyCode.F5))
+            {
+                Auto_Attack = !Auto_Attack;
+                ShowFeedback("自动普通攻击: " + (Auto_Attack ? "开启 (ON)" : "关闭 (OFF)"));
+            }
 
-            if (!ModEnabled || Player == null || (!AutoCastOutOfCombat && !Player.isInCombat)) return;
+            if (Player == null || (!AutoCastOutOfCombat && !Player.isInCombat)) return;
             if (Time.time - lastSearchTime < SearchInterval) return;
             lastSearchTime = Time.time;
             TryAutoCastSkill();
@@ -138,13 +135,96 @@ namespace AutoUseSkill
             Player.Control.CmdAttack(controlManager.targetEnemy, false);
         }
 
+        private void InitStyles()
+        {
+            if (badgeStyle == null)
+            {
+                badgeStyle = new GUIStyle(GUI.skin.box);
+                badgeStyle.alignment = TextAnchor.MiddleCenter;
+                badgeStyle.fontSize = 11;
+                badgeStyle.richText = true;
+                badgeStyle.padding = new RectOffset(0, 0, 0, 0);
+                badgeStyle.margin = new RectOffset(0, 0, 0, 0);
+            }
+        }
+
+        private void DrawBadge(Rect rect, bool isOn, string label)
+        {
+            Color oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = isOn ? new Color(0.1f, 0.85f, 0.2f, 0.92f) : new Color(0.85f, 0.15f, 0.15f, 0.92f);
+            GUI.Box(rect, "<b>" + label + "</b>", badgeStyle);
+            GUI.backgroundColor = oldBg;
+        }
+
         private void OnGUI()
         {
+            InitStyles();
+
+            // 1. Toast floating feedback banner (1.5 seconds)
             if (Time.time < feedbackEndTime && !string.IsNullOrEmpty(feedbackText))
             {
                 GUI.Box(new Rect(Screen.width * 0.38f, 15f, Screen.width * 0.24f, 32f), feedbackText);
             }
 
+            // 2. Persistent ON/OFF badges directly on in-game skill icons
+            if (ManagerBase<UI_InGame_SkillButtons>.instance != null && ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons != null)
+            {
+                UI_InGame_SkillButton[] skillBtns = ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons;
+                Vector3 firstPos = Vector3.zero;
+                float firstHalfH = 28f;
+                bool foundFirst = false;
+
+                for (int i = 0; i < skillBtns.Length; i++)
+                {
+                    UI_InGame_SkillButton btn = skillBtns[i];
+                    if (btn == null || !btn.isActiveAndEnabled) continue;
+
+                    int slot = -1;
+                    switch (btn.skillType)
+                    {
+                        case HeroSkillLocation.Q: slot = 0; break;
+                        case HeroSkillLocation.W: slot = 1; break;
+                        case HeroSkillLocation.E: slot = 2; break;
+                        case HeroSkillLocation.R: slot = 3; break;
+                    }
+
+                    if (slot >= 0 && slot < 4)
+                    {
+                        Vector3 pos = btn.icon != null ? btn.icon.transform.position : btn.transform.position;
+                        float cx = pos.x;
+                        float cy = Screen.height - pos.y;
+                        float halfH = 28f;
+
+                        if (btn.icon != null && btn.icon.rectTransform != null)
+                        {
+                            halfH = btn.icon.rectTransform.rect.height * 0.5f * btn.icon.transform.lossyScale.y;
+                            if (halfH <= 0f) halfH = 28f;
+                        }
+
+                        if (!foundFirst)
+                        {
+                            firstPos = pos;
+                            firstHalfH = halfH;
+                            foundFirst = true;
+                        }
+
+                        // Badge positioned neatly inside the skill icon near the top
+                        Rect badgeRect = new Rect(cx - 17f, cy - halfH + 4f, 34f, 16f);
+                        DrawBadge(badgeRect, AutoUseDict[slot], AutoUseDict[slot] ? "ON" : "OFF");
+                    }
+                }
+
+                if (foundFirst)
+                {
+                    // Draw Auto Attack badge to the left of Q skill button
+                    float qx = firstPos.x;
+                    float qy = Screen.height - firstPos.y;
+                    Rect atkRect = new Rect(qx - 66f, qy - firstHalfH + 4f, 58f, 18f);
+                    DrawBadge(atkRect, Auto_Attack, Auto_Attack ? "普攻 ON" : "普攻 OFF");
+                }
+            }
+
+            // 3. Settings window
             if (!ShowGUI) return;
             WindowRect = GUILayout.Window(9999, WindowRect, MenuGui, "Auto Use Skill", "box");
         }
@@ -156,11 +236,10 @@ namespace AutoUseSkill
             GUILayout.BeginVertical();
             GUILayout.Label("", option);
             GUILayout.BeginHorizontal();
-            ModEnabled = GUILayout.Toggle(ModEnabled, "启用 (Enable)", option);
             AutoCastOutOfCombat = GUILayout.Toggle(AutoCastOutOfCombat, "脱战施法 (Out Of Combat)", option);
+            Auto_Attack = GUILayout.Toggle(Auto_Attack, "自动普攻 (F5)", option);
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
-            Auto_Attack = GUILayout.Toggle(Auto_Attack, "自动普攻 (Attack)", option);
             AutoUseDict[0] = GUILayout.Toggle(AutoUseDict[0], "Q (F1)", option);
             AutoUseDict[1] = GUILayout.Toggle(AutoUseDict[1], "W (F2)", option);
             AutoUseDict[2] = GUILayout.Toggle(AutoUseDict[2], "E (F3)", option);

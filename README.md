@@ -12,21 +12,25 @@
 ### ✨ 主要特性
 
 - **智能自动施法**：自动检测冷却（CD）、技能有效射程与合法目标（支持单体目标、锥形范围、弹道指向等不同施法类型）。
-- **智能自动普攻**：目标在攻击距离内时自动衔接普通攻击。
-- **独立技能快捷键**：局内随时按 F1 ~ F4 独立启用/关闭特定技能（例如留存大招或位移保命技能），并伴有 1.5 秒轻量屏幕浮动文字提示（Toast）。
+- **智能自动普攻**：目标在攻击距离内时自动衔接普通攻击，支持通过快捷键一键启闭。
+- **独立技能快捷键**：局内随时按 F1 ~ F4 独立切换 Q/W/E/R 技能自动释放，按 F5 切换自动普攻。
+- **技能图标常驻状态显示**：在游戏技能栏各个图标内常驻显示醒目的状态标签：
+  - 开启时显示绿色 **ON** 标签
+  - 关闭时显示红色 **OFF** 标签
+  - 自动普攻在技能栏左侧常驻显示 **普攻 ON / OFF**
 - **局内图形化设置**：按 I 键随时呼出/关闭浮动设置菜单，支持调整技能开关、脱战施法以及检测频率滑条。
 - **轻量零依赖**：完全依赖游戏底层组件，性能开销极低。
 
 ### ⌨️ 快捷键一览
 
-| 按键 | 功能说明 |
-| :---: | :--- |
-| **I** | 打开 / 关闭图形化设置窗口 |
-| **O** | 自动施法与普攻总开关（全局暂停 / 恢复） |
-| **F1** | 单独切换 **Q 技能** 自动释放（开 / 关） |
-| **F2** | 单独切换 **W 技能** 自动释放（开 / 关） |
-| **F3** | 单独切换 **E 技能** 自动释放（开 / 关） |
-| **F4** | 单独切换 **R 技能** 自动释放（开 / 关） |
+| 按键 | 功能说明 | 图标常驻显示 |
+| :---: | :--- | :---: |
+| **F1** | 切换 **Q 技能** 自动释放（开 / 关） | 绿色 ON / 红色 OFF |
+| **F2** | 切换 **W 技能** 自动释放（开 / 关） | 绿色 ON / 红色 OFF |
+| **F3** | 切换 **E 技能** 自动释放（开 / 关） | 绿色 ON / 红色 OFF |
+| **F4** | 切换 **R 技能** 自动释放（开 / 关） | 绿色 ON / 红色 OFF |
+| **F5** | 切换 **自动普通攻击**（开 / 关） | 绿色 普攻 ON / 红色 普攻 OFF |
+| **I** | 打开 / 关闭图形化设置窗口 | — |
 
 > **提示**：若开启了游戏设置中的【开发者模式】，在控制台（~ 键）输入 utoskill 也可调出设置窗口。
 
@@ -50,7 +54,7 @@
 
 本项目兼容 .NET Framework 4.7.2 / C# 5+ 编译器，依赖游戏本体目录下的核心 DLL：
 - 引用路径：<游戏根目录>/Shape of Dreams_Data/Managed/
-- 关键依赖项：Dew.Core.dll、UnityEngine.CoreModule.dll、UnityEngine.IMGUIModule.dll、UnityEngine.InputLegacyModule.dll
+- 关键依赖项：Dew.Core.dll、Dew.UI.dll、UnityEngine.CoreModule.dll、UnityEngine.IMGUIModule.dll、UnityEngine.InputLegacyModule.dll
 
 ---
 
@@ -62,21 +66,25 @@ A native Quality-of-Life (QoL) mod for the action roguelike *Shape of Dreams*. B
 ### ✨ Features
 
 - **Smart Auto-Cast**: Automatically verifies cooldowns, effective skill ranges, and target validators (supports Cone, Arrow, Target, and Point cast methods).
-- **Auto-Attack**: Automatically executes basic attacks when an enemy is within attack range.
-- **Individual Skill Hotkeys**: Toggle auto-casting for Q/W/E/R independently in real-time (F1–F4) with a brief 1.5-second on-screen toast notification.
+- **Smart Auto-Attack**: Automatically executes basic attacks when an enemy is within attack range, easily toggled on/off.
+- **Individual Hotkeys**: Toggle auto-casting for Q/W/E/R independently in real-time (F1–F4), and auto-attack via F5.
+- **Persistent In-Icon Badges**: Permanent, high-contrast badges displayed directly inside each skill icon:
+  - Green **ON** when enabled
+  - Red **OFF** when disabled
+  - Auto-attack badge (普攻 ON / OFF) displayed beside the skill bar.
 - **In-Game GUI**: Press I to toggle a draggable configuration window to adjust toggles, out-of-combat casting, and detection interval.
 - **Zero Overhead**: Clean, pure implementation directly interfacing with Dew.Core without external mod loaders.
 
 ### ⌨️ Controls & Hotkeys
 
-| Key | Description |
-| :---: | :--- |
-| **I** | Toggle settings window on / off |
-| **O** | Master toggle for auto-cast & auto-attack |
-| **F1** | Toggle auto-cast for **Skill 1 (Q)** |
-| **F2** | Toggle auto-cast for **Skill 2 (W)** |
-| **F3** | Toggle auto-cast for **Skill 3 (E)** |
-| **F4** | Toggle auto-cast for **Skill 4 (R)** |
+| Key | Description | In-Icon Badge |
+| :---: | :--- | :---: |
+| **F1** | Toggle auto-cast for **Skill 1 (Q)** | Green ON / Red OFF |
+| **F2** | Toggle auto-cast for **Skill 2 (W)** | Green ON / Red OFF |
+| **F3** | Toggle auto-cast for **Skill 3 (E)** | Green ON / Red OFF |
+| **F4** | Toggle auto-cast for **Skill 4 (R)** | Green ON / Red OFF |
+| **F5** | Toggle **Auto-Attack** | Green 普攻 ON / Red 普攻 OFF |
+| **I** | Toggle settings window on / off | — |
 
 > **Note**: If Developer Mode is enabled in settings, you can also type utoskill in the debug console (~) to toggle the GUI.
 
@@ -100,7 +108,7 @@ A native Quality-of-Life (QoL) mod for the action roguelike *Shape of Dreams*. B
 
 Compatible with standard .NET / Roslyn compilers referencing the managed assemblies in your game directory:
 - Reference directory: <GameRoot>/Shape of Dreams_Data/Managed/
-- Key assemblies: Dew.Core.dll, UnityEngine.CoreModule.dll, UnityEngine.IMGUIModule.dll, UnityEngine.InputLegacyModule.dll
+- Key assemblies: Dew.Core.dll, Dew.UI.dll, UnityEngine.CoreModule.dll, UnityEngine.IMGUIModule.dll, UnityEngine.InputLegacyModule.dll
 
 ---
 
