@@ -284,6 +284,17 @@ namespace AutoUseSkill
         {
             if (player == null || cm == null) return;
 
+            // If hero is actively channeling an ongoing attack (e.g. Yubar continuous laser beam)
+            // or an ongoing channeled ability, do not interrupt it with auto-cast skills!
+            if (player.Ability != null && player.Ability.attackAbility != null && player.Ability.attackAbility.Network_isCasting)
+            {
+                return;
+            }
+            if (player.Control != null && player.Control.ongoingChannels != null && player.Control.ongoingChannels.Count > 0)
+            {
+                return;
+            }
+
             for (var i = 0; i <= 3; i++)
             {
                 if (!AutoUseDict[i]) continue;
@@ -299,7 +310,7 @@ namespace AutoUseSkill
                 TriggerConfig config = skill.currentConfig;
                 if (config == null) continue;
 
-                EntityRelation targets = config.targetValidator.targets;
+                EntityRelation targets = config.targetValidator != null ? config.targetValidator.targets : (EntityRelation)0;
                 bool canTargetSelf = (targets & EntityRelation.Self) != 0;
                 bool canTargetEnemy = (targets & EntityRelation.Enemy) != 0;
                 CastMethodType castType = config.castMethod != null ? config.castMethod.type : CastMethodType.None;
@@ -323,26 +334,7 @@ namespace AutoUseSkill
                     // Must ALWAYS target the player, never a distant enemy!
                     if (isSelfOrDefensive)
                     {
-                        if (castType == CastMethodType.Point)
-                        {
-                            // Ground-targeted defensive dome / healing sanctuary -> place at player's own position
-                            cm.CastAbility(skill, new CastInfo(player, player.agentPosition), false);
-                        }
-                        else if (castType == CastMethodType.Target)
-                        {
-                            // Unit-targeted shield / heal -> cast on player (Self)
-                            cm.CastAbility(skill, new CastInfo(player, player), false);
-                        }
-                        else if (castType == CastMethodType.None)
-                        {
-                            // Instant self-buff / shield
-                            cm.CastAbility(skill, new CastInfo(player), false);
-                        }
-                        else
-                        {
-                            // Directional healing wave or buff
-                            cm.CastAbilityAuto(skill);
-                        }
+                        cm.CastAbility(skill, skill.GetCastInfoToTarget(player), false);
                         continue;
                     }
 
@@ -360,54 +352,15 @@ namespace AutoUseSkill
                         enemyTarget = FindClosestValidEnemy(player, config, 25f);
                     }
 
-                    // If an enemy is in effective range: cast offensive skill at enemy
+                    // If an enemy is in effective range: cast offensive skill at enemy using native predicted targeting
                     if (enemyTarget != null)
                     {
-                        if (castType == CastMethodType.Cone || castType == CastMethodType.Arrow)
-                        {
-                            // Directional skillshot -> aim at enemy with computed angle (fixes firing straight up)
-                            cm.CastAbility(skill, skill.GetCastInfoToTarget(enemyTarget), false);
-                        }
-                        else if (castType == CastMethodType.Point)
-                        {
-                            // Ground-targeted offensive AOE (meteor, lightning) -> place at enemy position
-                            cm.CastAbility(skill, skill.GetCastInfoToTarget(enemyTarget), false);
-                        }
-                        else if (castType == CastMethodType.Target)
-                        {
-                            // Targeted offensive spell -> target enemy
-                            cm.CastAbility(skill, new CastInfo(player, enemyTarget), false);
-                        }
-                        else if (castType == CastMethodType.None)
-                        {
-                            // PBAoE around player damaging nearby enemy
-                            cm.CastAbility(skill, new CastInfo(player), false);
-                        }
-                        else
-                        {
-                            cm.CastAbilityAuto(skill);
-                        }
+                        cm.CastAbility(skill, skill.GetPredictedCastInfoToTarget(enemyTarget), false);
                     }
-                    else
+                    else if (canTargetSelf)
                     {
-                        // No enemy in range:
-                        // If the skill is hybrid and can target Self as a fallback
-                        if (canTargetSelf)
-                        {
-                            if (castType == CastMethodType.Point)
-                            {
-                                cm.CastAbility(skill, new CastInfo(player, player.agentPosition), false);
-                            }
-                            else if (castType == CastMethodType.Target)
-                            {
-                                cm.CastAbility(skill, new CastInfo(player, player), false);
-                            }
-                            else if (castType == CastMethodType.None)
-                            {
-                                cm.CastAbility(skill, new CastInfo(player), false);
-                            }
-                        }
-                        // Pure offensive skill with no enemy in range: DO NOT CAST to preserve cooldown!
+                        // Fallback for hybrid skills that can target self when no enemies are nearby
+                        cm.CastAbility(skill, skill.GetCastInfoToTarget(player), false);
                     }
                 }
                 catch (Exception ex)
@@ -425,6 +378,7 @@ namespace AutoUseSkill
 
             // Continuous channel check (e.g. Yubar laser beam): do not disrupt active channel!
             if (attackAbility.Network_isCasting) return;
+            if (player.Control != null && player.Control.ongoingChannels != null && player.Control.ongoingChannels.Count > 0) return;
 
             if (!attackAbility.CanBeCast()) return;
 
@@ -475,7 +429,16 @@ namespace AutoUseSkill
                 return;
             }
 
-            // 3. Issue single native server attack command without canceling movement (cancelMovement = false)
+            // 3. Target lock check:
+            // If the player is already locked onto and actively attacking this exact target,
+            // DO NOT re-issue CmdAttack. Re-issuing CmdAttack every tick resets the attack animation
+            // and cuts off continuous channeled beams (such as Yubar's beam).
+            if (player.Control != null && player.Control.attackTarget == target)
+            {
+                return;
+            }
+
+            // 4. Issue native server attack command without canceling movement (cancelMovement = false)
             try
             {
                 player.Control.CmdAttack(target, false);
