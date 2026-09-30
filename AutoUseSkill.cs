@@ -179,6 +179,25 @@ namespace AutoUseSkill
             feedbackEndTime = Time.time + 1.5f;
         }
 
+        private static bool IsImmuneOrSpawning(Entity e)
+        {
+            if (e == null || !e.isActive || !e.isAlive || e.isDead) return true;
+
+            // 1. Spawning invulnerability filter (monster emerging / spawning animation)
+            if (e.Visual != null && e.Visual.isSpawning && e.Visual.invulnerableWhileSpawning)
+            {
+                return true;
+            }
+
+            // 2. Invulnerable status filter (e.g. boss invulnerable transition phase)
+            if (e.Status != null && (e.Status.isDead || e.Status.hasInvulnerable))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private static bool IsAttackableProp(Entity e)
         {
             if (e == null || !e.isActive || !e.isAlive || e.isDead) return false;
@@ -326,6 +345,8 @@ namespace AutoUseSkill
 
                         if (player.GetRelation(e) == EntityRelation.Enemy)
                         {
+                            if (IsImmuneOrSpawning(e)) continue;
+
                             float dSq = (e.agentPosition - playerPos).sqrMagnitude;
                             if (dSq < minEnemyDistSq)
                             {
@@ -369,6 +390,7 @@ namespace AutoUseSkill
                         if (e.Status != null && (e.Status.isDead || e.Status.isUndetectableByNonAllies)) continue;
 
                         if (player.GetRelation(e) != EntityRelation.Enemy) continue;
+                        if (IsImmuneOrSpawning(e)) continue;
 
                         if (config.targetValidator != null && !config.targetValidator.Evaluate(player, e)) continue;
                         if (!config.CheckRange(player, e)) continue;
@@ -622,7 +644,8 @@ namespace AutoUseSkill
                 {
                     bool isValidEnemy = target.isActive && target.isAlive && player.GetRelation(target) == EntityRelation.Enemy;
                     bool inRange = attackAbility.currentConfig != null && attackAbility.currentConfig.CheckRange(player, target);
-                    if (!isValidEnemy || !inRange)
+                    bool isImmune = IsImmuneOrSpawning(target);
+                    if (!isValidEnemy || !inRange || isImmune)
                     {
                         target = null;
                     }
