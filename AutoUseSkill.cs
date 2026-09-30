@@ -1,29 +1,81 @@
 ﻿using System;
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace AutoUseSkill
 {
+    public class AutoUseSkillConfig : ModConfig
+    {
+        [Header("快捷键设置 (Hotkeys)")]
+        [LabelText("Q 技能自动释放快捷键")]
+        public KeyCode keySkillQ = KeyCode.F1;
+
+        [LabelText("W 技能自动释放快捷键")]
+        public KeyCode keySkillW = KeyCode.F2;
+
+        [LabelText("E 技能自动释放快捷键")]
+        public KeyCode keySkillE = KeyCode.F3;
+
+        [LabelText("R 技能自动释放快捷键")]
+        public KeyCode keySkillR = KeyCode.F4;
+
+        [LabelText("自动普通攻击快捷键")]
+        public KeyCode keyAutoAttack = KeyCode.F5;
+
+        [LabelText("自动击碎矿石/金币罐快捷键")]
+        public KeyCode keyAutoProps = KeyCode.F6;
+
+        [Space(10)]
+        [Header("默认启动状态 (Default States)")]
+        [LabelText("脱战时是否允许自动施法")]
+        public bool autoCastOutOfCombat = false;
+
+        [LabelText("游戏启动时默认开启自动普攻")]
+        public bool defaultAutoAttack = false;
+
+        [LabelText("游戏启动时默认开启自动敲矿/罐")]
+        public bool defaultAutoProps = true;
+
+        [Space(10)]
+        [Header("性能检测 (Performance)")]
+        [LabelText("检测扫描间隔 (秒)")]
+        public float searchInterval = 0.05f;
+    }
+
     public class AutoUseSkill : ModBehaviour
     {
         private const int WindowId = 894270;
 
-        private bool AutoCastOutOfCombat;
+        // Native Mod Configuration integration
+        public AutoUseSkillConfig config = new AutoUseSkillConfig();
+
         private bool ShowGUI;
         private KeyCode OpenMenuKey = KeyCode.I;
         private float ButtonHeight = 0.035f;
         private Rect WindowRect;
+
         private bool Auto_Attack;
         private bool Auto_Attack_Props = true;
         private bool[] AutoUseDict = new bool[4];
         private float lastSearchTime = 0f;
-        private float SearchInterval = 0.05f;
 
         private string feedbackText = "";
         private float feedbackEndTime = 0f;
 
         private bool isInCombatRoom = false;
-        private Canvas cachedCanvas = null;
+
+        // Native UGUI TextMeshPro Overlay Components
+        private Canvas overlayCanvas;
+        private TextMeshProUGUI[] skillLabels = new TextMeshProUGUI[4];
+        private TextMeshProUGUI attackLabel;
+        private TextMeshProUGUI propsLabel;
+        private bool hudStyled = false;
+        private Vector3[] cornersBuffer = new Vector3[4];
+
+        private static readonly Color ColorOn = new Color(0.2f, 1f, 0.4f, 1f);
+        private static readonly Color ColorOff = new Color(1f, 0.3f, 0.3f, 1f);
 
         private bool IsInCombatRoom
         {
@@ -49,11 +101,24 @@ namespace AutoUseSkill
 
         private void Awake()
         {
-            Debug.Log("[AutoUseSkill] Mod loaded successfully!");
-            // Dynamic window height calculated by GUILayout
+            Debug.Log("[AutoUseSkill] Mod loaded with native UGUI HUD and ModConfig!");
             WindowRect = new Rect(Screen.width * 0.35f, Screen.height * 0.4f, Screen.width * 0.30f, 0f);
+
+            // Initialize runtime state from saved configuration
+            if (config != null)
+            {
+                Auto_Attack = config.defaultAutoAttack;
+                Auto_Attack_Props = config.defaultAutoProps;
+            }
+
             UpdateCombatRoomStatus(SceneManager.GetActiveScene());
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
+        }
+
+        public override void OnConfigChanged()
+        {
+            base.OnConfigChanged();
+            Debug.Log("[AutoUseSkill] Configuration updated via Settings menu.");
         }
 
         private void OnDestroy()
@@ -69,14 +134,23 @@ namespace AutoUseSkill
                     AutoUseDict[i] = false;
                 }
             }
-            cachedCanvas = null;
+
+            if (overlayCanvas != null && overlayCanvas.gameObject != null)
+            {
+                Destroy(overlayCanvas.gameObject);
+                overlayCanvas = null;
+            }
+
             Debug.Log("[AutoUseSkill] Mod unloaded.");
         }
 
         private void OnActiveSceneChanged(Scene current, Scene next)
         {
-            cachedCanvas = null;
             UpdateCombatRoomStatus(next);
+            if (!isInCombatRoom && overlayCanvas != null && overlayCanvas.gameObject.activeSelf)
+            {
+                overlayCanvas.gameObject.SetActive(false);
+            }
         }
 
         private void UpdateCombatRoomStatus(Scene scene)
@@ -127,48 +201,71 @@ namespace AutoUseSkill
                 ShowGUI = !ShowGUI;
 
             // Zero overhead when outside actual combat rooms (in Lobby, Traveler settings, Title, etc.)
-            if (!IsInCombatRoom) return;
+            if (!IsInCombatRoom)
+            {
+                if (overlayCanvas != null && overlayCanvas.gameObject.activeSelf)
+                {
+                    overlayCanvas.gameObject.SetActive(false);
+                }
+                return;
+            }
 
-            if (Input.GetKeyDown(KeyCode.F1))
+            // Hotkey detection (dynamically bound to native ModConfig)
+            KeyCode kQ = config != null ? config.keySkillQ : KeyCode.F1;
+            KeyCode kW = config != null ? config.keySkillW : KeyCode.F2;
+            KeyCode kE = config != null ? config.keySkillE : KeyCode.F3;
+            KeyCode kR = config != null ? config.keySkillR : KeyCode.F4;
+            KeyCode kAtk = config != null ? config.keyAutoAttack : KeyCode.F5;
+            KeyCode kProps = config != null ? config.keyAutoProps : KeyCode.F6;
+
+            if (Input.GetKeyDown(kQ))
             {
                 AutoUseDict[0] = !AutoUseDict[0];
                 ShowFeedback(string.Format("Q 技能自动释放: {0}", AutoUseDict[0] ? "开启 (ON)" : "关闭 (OFF)"));
             }
-            if (Input.GetKeyDown(KeyCode.F2))
+            if (Input.GetKeyDown(kW))
             {
                 AutoUseDict[1] = !AutoUseDict[1];
                 ShowFeedback(string.Format("W 技能自动释放: {0}", AutoUseDict[1] ? "开启 (ON)" : "关闭 (OFF)"));
             }
-            if (Input.GetKeyDown(KeyCode.F3))
+            if (Input.GetKeyDown(kE))
             {
                 AutoUseDict[2] = !AutoUseDict[2];
                 ShowFeedback(string.Format("E 技能自动释放: {0}", AutoUseDict[2] ? "开启 (ON)" : "关闭 (OFF)"));
             }
-            if (Input.GetKeyDown(KeyCode.F4))
+            if (Input.GetKeyDown(kR))
             {
                 AutoUseDict[3] = !AutoUseDict[3];
                 ShowFeedback(string.Format("R 技能自动释放: {0}", AutoUseDict[3] ? "开启 (ON)" : "关闭 (OFF)"));
             }
-            if (Input.GetKeyDown(KeyCode.F5))
+            if (Input.GetKeyDown(kAtk))
             {
                 Auto_Attack = !Auto_Attack;
                 ShowFeedback(string.Format("自动普通攻击: {0}", Auto_Attack ? "开启 (ON)" : "关闭 (OFF)"));
             }
-            if (Input.GetKeyDown(KeyCode.F6))
+            if (Input.GetKeyDown(kProps))
             {
                 Auto_Attack_Props = !Auto_Attack_Props;
                 ShowFeedback(string.Format("自动击碎矿石/金币罐: {0}", Auto_Attack_Props ? "开启 (ON)" : "关闭 (OFF)"));
             }
 
+            // Update Native UGUI HUD badges
+            UpdateHud();
+
             // Local cache to guard against TOCTOU null reference
             Hero player = Player;
             if (player == null) return;
 
-            bool canCastSkill = AutoCastOutOfCombat || player.isInCombat;
+            bool hasAnySkillOn = AutoUseDict[0] || AutoUseDict[1] || AutoUseDict[2] || AutoUseDict[3];
+            bool allowOutOfCombat = config != null && config.autoCastOutOfCombat;
+            bool canCastSkill = hasAnySkillOn && (allowOutOfCombat || player.isInCombat);
             bool canAttack = Auto_Attack || Auto_Attack_Props;
+
+            // Early return if all auto features are off: zero entity search overhead!
             if (!canCastSkill && !canAttack) return;
 
-            if (Time.time - lastSearchTime < SearchInterval) return;
+            float interval = (config != null && config.searchInterval > 0.01f) ? config.searchInterval : 0.05f;
+            if (Time.time - lastSearchTime < interval) return;
             lastSearchTime = Time.time;
 
             ControlManager cm = controlManager;
@@ -258,6 +355,7 @@ namespace AutoUseSkill
                     {
                         if (e == null || !e.isActive || !e.isAlive || e.isDead) continue;
                         if (e.Status != null && (e.Status.isDead || e.Status.isUndetectableByNonAllies)) continue;
+
                         if (player.GetRelation(e) != EntityRelation.Enemy) continue;
 
                         if (config.targetValidator != null && !config.targetValidator.Evaluate(player, e)) continue;
@@ -334,7 +432,14 @@ namespace AutoUseSkill
                     // Must ALWAYS target the player, never a distant enemy!
                     if (isSelfOrDefensive)
                     {
-                        cm.CastAbility(skill, skill.GetCastInfoToTarget(player), false);
+                        if (castType == CastMethodType.Cone || castType == CastMethodType.Arrow)
+                        {
+                            cm.CastAbilityAuto(skill);
+                        }
+                        else
+                        {
+                            cm.CastAbility(skill, skill.GetCastInfoToTarget(player), false);
+                        }
                         continue;
                     }
 
@@ -384,7 +489,7 @@ namespace AutoUseSkill
 
             Entity target = null;
 
-            // 1. If Auto_Attack is enabled: search for aggressive enemies first
+            // 1. If Auto_Attack is enabled: search for aggressive enemies within attack range first
             if (Auto_Attack)
             {
                 // 1a. Native attack-move target finder (prioritizes aggressive enemies)
@@ -397,16 +502,24 @@ namespace AutoUseSkill
                     Debug.LogWarning("[AutoUseSkill] FindAttackMoveTarget error: " + ex.Message);
                 }
 
-                // 1b. Fallback to closest enemy within attack range
-                if (target == null || !target.isActive || !target.isAlive || player.GetRelation(target) != EntityRelation.Enemy)
+                // If FindAttackMoveTarget returned an invalid target or a target outside attack range, discard it
+                if (target != null)
                 {
-                    if (closestEnemy != null && closestEnemy.isActive && closestEnemy.isAlive)
+                    bool isValidEnemy = target.isActive && target.isAlive && player.GetRelation(target) == EntityRelation.Enemy;
+                    bool inRange = attackAbility.currentConfig != null && attackAbility.currentConfig.CheckRange(player, target);
+                    if (!isValidEnemy || !inRange)
                     {
-                        float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
-                        if (dSq <= attackRange * attackRange)
-                        {
-                            target = closestEnemy;
-                        }
+                        target = null;
+                    }
+                }
+
+                // 1b. Fallback to closest enemy within attack range
+                if (target == null && closestEnemy != null && closestEnemy.isActive && closestEnemy.isAlive)
+                {
+                    float dSq = (closestEnemy.agentPosition - player.agentPosition).sqrMagnitude;
+                    if (dSq <= attackRange * attackRange)
+                    {
+                        target = closestEnemy;
                     }
                 }
             }
@@ -423,7 +536,7 @@ namespace AutoUseSkill
 
             if (target == null || !target.isActive || !target.isAlive) return;
 
-            // Range validation
+            // Final range validation
             if (attackAbility.currentConfig != null && !attackAbility.currentConfig.CheckRange(player, target))
             {
                 return;
@@ -449,101 +562,185 @@ namespace AutoUseSkill
             }
         }
 
-        private void DrawSkillBadges()
+        // ==========================================
+        // Native UGUI TextMeshPro Indicator System
+        // ==========================================
+        private void EnsureHudOverlay()
         {
-            try
+            if (overlayCanvas != null) return;
+
+            GameObject go = new GameObject("AutoUseSkill_OverlayCanvas");
+            DontDestroyOnLoad(go);
+            overlayCanvas = go.AddComponent<Canvas>();
+            overlayCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            overlayCanvas.sortingOrder = 32760;
+
+            for (int i = 0; i < 4; i++)
             {
-                if (ManagerBase<UI_InGame_SkillButtons>.instance == null || ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons == null)
-                    return;
+                skillLabels[i] = CreateHudLabel(go.transform, "SkillBadge_" + i, new Vector2(70f, 24f));
+            }
 
-                UI_InGame_SkillButton[] skillBtns = ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons;
-                Vector3 firstPos = Vector3.zero;
-                float firstHalfH = 28f;
-                bool foundFirst = false;
+            attackLabel = CreateHudLabel(go.transform, "AtkBadge", new Vector2(100f, 26f));
+            propsLabel = CreateHudLabel(go.transform, "PropsBadge", new Vector2(100f, 26f));
+        }
 
-                for (int i = 0; i < skillBtns.Length; i++)
+        private TextMeshProUGUI CreateHudLabel(Transform parent, string name, Vector2 size)
+        {
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            TextMeshProUGUI tmp = obj.AddComponent<TextMeshProUGUI>();
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.raycastTarget = false;
+            tmp.textWrappingMode = TextWrappingModes.NoWrap;
+            tmp.overflowMode = TextOverflowModes.Overflow;
+            RectTransform rt = tmp.rectTransform;
+            rt.sizeDelta = size;
+            obj.SetActive(false);
+            return tmp;
+        }
+
+        private void EnsureHudStyled(UI_InGame_SkillButton[] btns)
+        {
+            if (hudStyled) return;
+
+            TMP_FontAsset font = null;
+            if (btns != null)
+            {
+                for (int i = 0; i < btns.Length; i++)
                 {
-                    UI_InGame_SkillButton btn = skillBtns[i];
-                    if (btn == null || !btn.isActiveAndEnabled) continue;
-
-                    int slot = -1;
-                    switch (btn.skillType)
+                    if (btns[i] != null)
                     {
-                        case HeroSkillLocation.Q: slot = 0; break;
-                        case HeroSkillLocation.W: slot = 1; break;
-                        case HeroSkillLocation.E: slot = 2; break;
-                        case HeroSkillLocation.R: slot = 3; break;
+                        TextMeshProUGUI existing = btns[i].GetComponentInChildren<TextMeshProUGUI>(true);
+                        if (existing != null && existing.font != null)
+                        {
+                            font = existing.font;
+                            break;
+                        }
                     }
-
-                    if (slot >= 0 && slot < 4)
-                    {
-                        Vector3 pos = btn.icon != null ? btn.icon.transform.position : btn.transform.position;
-
-                        if (cachedCanvas == null)
-                        {
-                            cachedCanvas = btn.GetComponentInParent<Canvas>();
-                        }
-
-                        if (cachedCanvas != null && cachedCanvas.renderMode != RenderMode.ScreenSpaceOverlay && cachedCanvas.worldCamera != null)
-                        {
-                            pos = RectTransformUtility.WorldToScreenPoint(cachedCanvas.worldCamera, pos);
-                        }
-
-                        float cx = pos.x;
-                        float cy = Screen.height - pos.y;
-                        float halfH = 28f;
-
-                        if (btn.icon != null && btn.icon.rectTransform != null)
-                        {
-                            halfH = btn.icon.rectTransform.rect.height * 0.5f * btn.icon.transform.lossyScale.y;
-                            if (halfH <= 0f) halfH = 28f;
-                        }
-
-                        if (!foundFirst)
-                        {
-                            firstPos = pos;
-                            firstHalfH = halfH;
-                            foundFirst = true;
-                        }
-
-                        // Badge positioned neatly inside the skill icon near the top
-                        Rect badgeRect = new Rect(cx - 17f, cy - halfH + 4f, 34f, 16f);
-                        bool isSkillOn = AutoUseDict[slot];
-                        Color oldCol = GUI.color;
-                        GUI.color = isSkillOn ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
-                        GUI.Box(badgeRect, isSkillOn ? "ON" : "OFF");
-                        GUI.color = oldCol;
-                    }
-                }
-
-                if (foundFirst)
-                {
-                    // Draw Auto Attack badge to the left of Q skill button
-                    float qx = firstPos.x;
-                    float qy = Screen.height - firstPos.y;
-                    Color oldCol = GUI.color;
-
-                    Rect atkRect = new Rect(qx - 66f, qy - firstHalfH + 4f, 58f, 18f);
-                    GUI.color = Auto_Attack ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
-                    GUI.Box(atkRect, Auto_Attack ? "普攻 ON" : "普攻 OFF");
-
-                    // Draw Auto Attack Props badge to the left of Auto Attack badge
-                    Rect propRect = new Rect(qx - 130f, qy - firstHalfH + 4f, 60f, 18f);
-                    GUI.color = Auto_Attack_Props ? new Color(0.1f, 1f, 0.3f, 0.95f) : new Color(1f, 0.25f, 0.25f, 0.95f);
-                    GUI.Box(propRect, Auto_Attack_Props ? "敲矿 ON" : "敲矿 OFF");
-
-                    GUI.color = oldCol;
                 }
             }
-            catch (Exception ex)
+
+            if (font == null) return;
+
+            StyleHudLabel(attackLabel, font, 13f);
+            StyleHudLabel(propsLabel, font, 13f);
+            for (int i = 0; i < 4; i++)
             {
-                Debug.LogWarning("[AutoUseSkill] DrawSkillBadges error: " + ex.Message);
+                StyleHudLabel(skillLabels[i], font, 12f);
+            }
+            hudStyled = true;
+        }
+
+        private void StyleHudLabel(TextMeshProUGUI label, TMP_FontAsset font, float size)
+        {
+            if (label == null) return;
+            label.font = font;
+            label.fontSize = size;
+            label.fontStyle = FontStyles.Bold;
+            if (label.fontMaterial != null)
+            {
+                label.fontMaterial.SetColor(ShaderUtilities.ID_OutlineColor, Color.black);
+                label.fontMaterial.SetFloat(ShaderUtilities.ID_OutlineWidth, 0.25f);
+                label.fontMaterial.SetFloat(ShaderUtilities.ID_FaceDilate, 0.15f);
+            }
+            label.UpdateMeshPadding();
+        }
+
+        private void UpdateHud()
+        {
+            if (!IsInCombatRoom || ManagerBase<UI_InGame_SkillButtons>.instance == null || ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons == null)
+            {
+                if (overlayCanvas != null && overlayCanvas.gameObject.activeSelf)
+                {
+                    overlayCanvas.gameObject.SetActive(false);
+                }
+                return;
+            }
+
+            EnsureHudOverlay();
+            if (!overlayCanvas.gameObject.activeSelf)
+            {
+                overlayCanvas.gameObject.SetActive(true);
+            }
+
+            UI_InGame_SkillButton[] btns = ManagerBase<UI_InGame_SkillButtons>.instance.skillButtons;
+            EnsureHudStyled(btns);
+
+            Vector3 qPos = Vector3.zero;
+            bool foundQ = false;
+
+            for (int i = 0; i < btns.Length; i++)
+            {
+                UI_InGame_SkillButton btn = btns[i];
+                if (btn == null || !btn.isActiveAndEnabled) continue;
+
+                int slot = -1;
+                switch (btn.skillType)
+                {
+                    case HeroSkillLocation.Q: slot = 0; break;
+                    case HeroSkillLocation.W: slot = 1; break;
+                    case HeroSkillLocation.E: slot = 2; break;
+                    case HeroSkillLocation.R: slot = 3; break;
+                }
+
+                if (slot >= 0 && slot < 4)
+                {
+                    RectTransform iconRt = btn.icon != null ? btn.icon.rectTransform : (btn.transform as RectTransform);
+                    if (iconRt != null)
+                    {
+                        iconRt.GetWorldCorners(cornersBuffer);
+                        Canvas parentCanvas = iconRt.GetComponentInParent<Canvas>();
+                        Camera cam = (parentCanvas != null && parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay) ? parentCanvas.worldCamera : null;
+
+                        Vector2 screenBL = RectTransformUtility.WorldToScreenPoint(cam, cornersBuffer[0]);
+                        Vector2 screenTR = RectTransformUtility.WorldToScreenPoint(cam, cornersBuffer[2]);
+
+                        float cx = Mathf.Lerp(screenBL.x, screenTR.x, 0.5f);
+                        float cy = Mathf.Lerp(screenBL.y, screenTR.y, 0.72f);
+                        Vector3 badgePos = new Vector3(cx, cy, 0f);
+
+                        if (slot == 0)
+                        {
+                            qPos = badgePos;
+                            foundQ = true;
+                        }
+
+                        TextMeshProUGUI label = skillLabels[slot];
+                        if (label != null)
+                        {
+                            if (!label.gameObject.activeSelf) label.gameObject.SetActive(true);
+                            label.transform.position = badgePos;
+                            bool isOn = AutoUseDict[slot];
+                            label.text = isOn ? "ON" : "OFF";
+                            label.color = isOn ? ColorOn : ColorOff;
+                        }
+                    }
+                }
+            }
+
+            // Auto Attack and Prop Badges placed neatly to the left of Q
+            if (foundQ)
+            {
+                if (attackLabel != null)
+                {
+                    if (!attackLabel.gameObject.activeSelf) attackLabel.gameObject.SetActive(true);
+                    attackLabel.transform.position = new Vector3(qPos.x - 70f, qPos.y, 0f);
+                    attackLabel.text = Auto_Attack ? "普攻 ON" : "普攻 OFF";
+                    attackLabel.color = Auto_Attack ? ColorOn : ColorOff;
+                }
+
+                if (propsLabel != null)
+                {
+                    if (!propsLabel.gameObject.activeSelf) propsLabel.gameObject.SetActive(true);
+                    propsLabel.transform.position = new Vector3(qPos.x - 165f, qPos.y, 0f);
+                    propsLabel.text = Auto_Attack_Props ? "敲矿 ON" : "敲矿 OFF";
+                    propsLabel.color = Auto_Attack_Props ? ColorOn : ColorOff;
+                }
             }
         }
 
         private void OnGUI()
         {
-            // If in Lobby, Traveler Settings, Constellations, or Main Menu: NEVER run badge checks or layout!
             if (!IsInCombatRoom)
             {
                 if (ShowGUI)
@@ -559,13 +756,7 @@ namespace AutoUseSkill
                 GUI.Box(new Rect(Screen.width * 0.38f, 15f, Screen.width * 0.24f, 32f), feedbackText);
             }
 
-            // 2. Persistent ON/OFF badges directly on in-game skill icons (only during Repaint)
-            if (Event.current.type == EventType.Repaint)
-            {
-                DrawSkillBadges();
-            }
-
-            // 3. Settings window
+            // 2. Settings window (optional quick menu)
             if (!ShowGUI) return;
             WindowRect = GUILayout.Window(WindowId, WindowRect, MenuGui, "Auto Use Skill", "box");
         }
@@ -577,18 +768,25 @@ namespace AutoUseSkill
             GUILayout.BeginVertical();
             GUILayout.Label("", option);
             GUILayout.BeginHorizontal();
-            AutoCastOutOfCombat = GUILayout.Toggle(AutoCastOutOfCombat, "脱战施法", option);
-            Auto_Attack = GUILayout.Toggle(Auto_Attack, "自动普攻 (F5)", option);
-            Auto_Attack_Props = GUILayout.Toggle(Auto_Attack_Props, "自动敲矿/罐 (F6)", option);
+            if (config != null)
+            {
+                config.autoCastOutOfCombat = GUILayout.Toggle(config.autoCastOutOfCombat, "脱战施法", option);
+            }
+            Auto_Attack = GUILayout.Toggle(Auto_Attack, "自动普攻", option);
+            Auto_Attack_Props = GUILayout.Toggle(Auto_Attack_Props, "自动敲矿/罐", option);
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
-            AutoUseDict[0] = GUILayout.Toggle(AutoUseDict[0], "Q (F1)", option);
-            AutoUseDict[1] = GUILayout.Toggle(AutoUseDict[1], "W (F2)", option);
-            AutoUseDict[2] = GUILayout.Toggle(AutoUseDict[2], "E (F3)", option);
-            AutoUseDict[3] = GUILayout.Toggle(AutoUseDict[3], "R (F4)", option);
+            AutoUseDict[0] = GUILayout.Toggle(AutoUseDict[0], "Q", option);
+            AutoUseDict[1] = GUILayout.Toggle(AutoUseDict[1], "W", option);
+            AutoUseDict[2] = GUILayout.Toggle(AutoUseDict[2], "E", option);
+            AutoUseDict[3] = GUILayout.Toggle(AutoUseDict[3], "R", option);
             GUILayout.EndHorizontal();
-            GUILayout.Label("检测间隔 (Interval): " + SearchInterval.ToString("0.00") + "s", option);
-            SearchInterval = (float)Math.Round(GUILayout.HorizontalSlider(SearchInterval, 0.03f, 0.5f, option), 2);
+            float interval = config != null ? config.searchInterval : 0.05f;
+            GUILayout.Label("检测间隔 (Interval): " + interval.ToString("0.00") + "s", option);
+            if (config != null)
+            {
+                config.searchInterval = (float)Math.Round(GUILayout.HorizontalSlider(config.searchInterval, 0.03f, 0.5f, option), 2);
+            }
             GUILayout.EndVertical();
         }
 
