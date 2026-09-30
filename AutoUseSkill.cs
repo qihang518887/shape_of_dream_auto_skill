@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Reflection;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -37,6 +38,11 @@ namespace AutoUseSkill
 
         [LabelText("游戏启动时默认开启自动敲矿/罐")]
         public bool defaultAutoProps = true;
+
+        [Space(10)]
+        [Header("蓄力技能设置 (Charge Skills)")]
+        [LabelText("蓄力技能满蓄自动释放")]
+        public bool autoReleaseFullCharge = true;
 
         [Space(10)]
         [Header("性能检测 (Performance)")]
@@ -283,6 +289,12 @@ namespace AutoUseSkill
             Entity closestProp;
             FindClosestTargets(player, 25f, attackRange + 2f, out closestEnemy, out closestProp);
 
+            // Check and handle ongoing charge skill (natural charging -> full charge auto-release)
+            if (TryHandleActiveCharge(player, cm, closestEnemy))
+            {
+                return;
+            }
+
             if (canCastSkill)
             {
                 TryAutoCastSkill(player, cm, closestEnemy);
@@ -376,6 +388,109 @@ namespace AutoUseSkill
             }
 
             return bestEnemy;
+        }
+
+        private static Action<DewPlayer, CastInfo> dispatchSampleCastDelegate;
+
+        private static void DispatchNativeSampleCast(CastInfo info)
+        {
+            try
+            {
+                if (DewPlayer.local == null) return;
+
+                if (dispatchSampleCastDelegate == null)
+                {
+                    MethodInfo mi = typeof(DewPlayer).GetMethod(
+                        "DispatchSample_Cast",
+                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public
+                    );
+                    if (mi != null)
+                    {
+                        dispatchSampleCastDelegate = (Action<DewPlayer, CastInfo>)Delegate.CreateDelegate(
+                            typeof(Action<DewPlayer, CastInfo>),
+                            mi
+                        );
+                    }
+                }
+
+                if (dispatchSampleCastDelegate != null)
+                {
+                    dispatchSampleCastDelegate(DewPlayer.local, info);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[AutoUseSkill] DispatchNativeSampleCast error: " + ex.Message);
+            }
+        }
+
+        private bool TryHandleActiveCharge(Hero player, ControlManager cm, Entity closestEnemy)
+        {
+            if (config == null || !config.autoReleaseFullCharge || cm == null || !cm.localSampleContext.HasValue)
+            {
+                return false;
+            }
+
+            SampleCastInfoContext ctx = cm.localSampleContext.Value;
+            AbilityTrigger trigger = ctx.trigger;
+            if (trigger == null || trigger.IsNullOrInactive()) return false;
+
+            SkillTrigger skill = trigger as SkillTrigger;
+            if (skill == null) return false;
+
+            // Check if this skill slot is enabled in AutoUseDict
+            int slot = -1;
+            if (player != null && player.Ability != null && player.Ability.abilities != null)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    AbilityTrigger ab;
+                    if (player.Ability.abilities.TryGetValue(i, out ab) && ab == trigger)
+                    {
+                        slot = i;
+                        break;
+                    }
+                }
+            }
+
+            // If the player is manually charging a skill whose auto toggle is OFF, do not interfere!
+            if (slot >= 0 && slot < 4 && !AutoUseDict[slot])
+            {
+                return false;
+            }
+
+            // Check charge progress (in Shape of Dreams, fillAmount reaches 1.0f on full charge)
+            if (trigger.fillAmount < 0.98f)
+            {
+                // Still charging: return true to pause other actions and let charge accumulate
+                return true;
+            }
+
+            // Reached full charge! Re-target nearest enemy and fire
+            TriggerConfig cfg = trigger.currentConfig;
+            Entity target = null;
+
+            if (closestEnemy != null && (cfg == null || cfg.targetValidator == null || cfg.targetValidator.Evaluate(player, closestEnemy)) && (cfg == null || cfg.CheckRange(player, closestEnemy)))
+            {
+                target = closestEnemy;
+            }
+            else if (cfg != null)
+            {
+                target = FindClosestValidEnemy(player, cfg, 25f);
+            }
+
+            CastInfo releaseInfo;
+            if (target != null)
+            {
+                releaseInfo = trigger.GetPredictedCastInfoToTarget(target);
+            }
+            else
+            {
+                releaseInfo = ctx.currentInfo;
+            }
+
+            DispatchNativeSampleCast(releaseInfo);
+            return true;
         }
 
         private void TryAutoCastSkill(Hero player, ControlManager cm, Entity closestEnemy)
